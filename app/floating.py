@@ -455,13 +455,16 @@ class FloatingApp:
             pass
 
     def _bg_schedule(self, surf):
-        """拖拽/缩放期间防抖重绘（50ms），避免每个 Configure 都做像素拉伸。"""
-        if getattr(self, "_bg_after", None) is not None:
+        """拖拽/缩放期间防抖重绘（50ms），避免每个 Configure 都做像素拉伸。
+        每个画布独立的 pending 标记，避免不同画布事件互相取消。"""
+        key = "_bg_pending_" + str(id(surf))
+        old = getattr(self, key, None)
+        if old is not None:
             try:
-                self.root.after_cancel(self._bg_after)
+                self.root.after_cancel(old)
             except Exception:
                 pass
-        self._bg_after = self.root.after(50, lambda: self._bg_paint(surf))
+        setattr(self, key, self.root.after(50, lambda: self._bg_paint(surf)))
 
     def _rgb_to_photo(self, rgb, w, h):
         """RGB 字节 → 临时 PPM → PhotoImage（Tk 原生快速读取）。"""

@@ -19,7 +19,7 @@ html { -webkit-text-size-adjust: 100%; }
 /* ---------- 背景图片（后台设置页壁纸，来自 /api/bg） ---------- */
 #bgimg {
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background-position: center; background-size: cover; background-repeat: no-repeat;
+  background-position: center; background-size: 100% 100%; background-repeat: no-repeat;
   display: none;
 }
 #bgimg.on { display: block; }

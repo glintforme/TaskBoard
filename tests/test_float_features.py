@@ -444,6 +444,54 @@ def main():
                       p3 is not None and p3.width() == w and p3.height() == h,
                       "factor=%s photo=%s canvas=%s" % (app._bg_surf_collapsed.get("factor"),
                                                         (p3.width(), p3.height()) if p3 else None, (w, h)))
+                # 任意多次改变窗口大小 → 背景图始终保持恰好铺满（HTML 式自适应，轮询等待防抖重绘）
+                fill_ok = True
+                for (gw, gh) in ((300, 170), (520, 300), (340, 130), (260, 320)):
+                    app.root.geometry("%dx%d+200+100" % (gw, gh))
+                    ok = False
+                    for _ in range(25):
+                        app.root.update()
+                        pp = app._bg_surf_collapsed.get("photo")
+                        if pp is not None and (pp.width(), pp.height()) == (
+                                app.collapsed.winfo_width(), app.collapsed.winfo_height()):
+                            ok = True
+                            break
+                        time.sleep(0.04)
+                    if not ok:
+                        fill_ok = False
+                        break
+                check("壁纸:任意缩放始终保持铺满(折叠态)", fill_ok,
+                      "photo=%s canvas=%s" % (
+                          (pp.width(), pp.height()) if pp else None,
+                          (app.collapsed.winfo_width(), app.collapsed.winfo_height())))
+                # 展开态同样任意缩放铺满
+                app.set_expanded(True)
+                app.root.update()
+                time.sleep(0.15)
+                app.root.update()
+                fill_ok2 = True
+                fail_info2 = ""
+                for (gw, gh) in ((420, 360), (300, 260), (540, 480)):
+                    app.root.geometry("%dx%d+200+100" % (gw, gh))
+                    ok2 = False
+                    for _ in range(25):
+                        app.root.update()
+                        pp2 = app._bg_surf_expand.get("photo")
+                        if pp2 is not None and (pp2.width(), pp2.height()) == (
+                                app.canvas.winfo_width(), app.canvas.winfo_height()):
+                            ok2 = True
+                            break
+                        time.sleep(0.04)
+                    if not ok2:
+                        fill_ok2 = False
+                        fail_info2 = ("want=%dx%d canvas=%dx%d photo=%s win=%s" % (
+                            gw, gh, app.canvas.winfo_width(), app.canvas.winfo_height(),
+                            (pp2.width(), pp2.height()) if pp2 else None,
+                            app.root.geometry()))
+                        break
+                check("壁纸:任意缩放始终保持铺满(展开态)", fill_ok2, fail_info2)
+                app.set_expanded(False)
+                app.root.update()
                 # 移除后各面板清空
                 app._remove_bg_image()
                 app.root.update()
