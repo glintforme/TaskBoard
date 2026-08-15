@@ -165,23 +165,42 @@ def main():
                       for t in titles)
         check("长标题完整显示（自动换行，未截断）", full_ok, titles[:2])
 
-        # 窗口拖窄 → 标题自动重排（换行宽度变小），宽度不被强制弹回
-        wl_before = {c: mw for c, _, mw, _ in app._wrap_labels
-                     if str(app.canvas.itemcget(c, "text")).startswith("▸")}
+        # 窗口拖窄 → 内容随宽度实时整体重排（HTML 式自适应，无需再次点击），宽度不被强制弹回
+        mw_before = [mw for c, _, mw, _ in app._wrap_labels
+                     if str(app.canvas.itemcget(c, "text")).startswith("▸")]
         app.root.geometry("240x%d+200+80" % h)
-        for _ in range(40):
+        for _ in range(60):
             app.root.update()
             if app.root.winfo_width() <= 250:
                 break
             time.sleep(0.02)
         app.root.update()
+        time.sleep(0.15)  # 等防抖重排（80ms）
+        app.root.update()
         win_w = app.root.winfo_width()
-        wl_after = {c: mw for c, _, mw, _ in app._wrap_labels
-                    if str(app.canvas.itemcget(c, "text")).startswith("▸")}
+        mw_after = [mw for c, _, mw, _ in app._wrap_labels
+                    if str(app.canvas.itemcget(c, "text")).startswith("▸")]
         check("窗口拖窄后宽度保持用户设置(240)", win_w <= 250, "win_w=%d" % win_w)
-        narrowed = any(wl_after.get(k, wl_before.get(k, 0)) < wl_before.get(k, 1e9) for k in wl_before)
-        check("窗口拖窄后标题自动重排（换行宽度变小）", narrowed,
-              "before=%s after=%s" % (wl_before, wl_after))
+        check("窗口拖窄后标题自动重排（换行宽度变小）",
+              bool(mw_before) and bool(mw_after) and max(mw_after) < max(mw_before),
+              "before=%s after=%s" % (mw_before, mw_after))
+        # 拖宽 → 内容立即重新铺排（换行宽度变大）
+        app.root.geometry("520x%d+200+80" % h)
+        for _ in range(60):
+            app.root.update()
+            if app.root.winfo_width() >= 500:
+                break
+            time.sleep(0.02)
+        app.root.update()
+        time.sleep(0.15)
+        app.root.update()
+        mw_wide = [mw for c, _, mw, _ in app._wrap_labels
+                   if str(app.canvas.itemcget(c, "text")).startswith("▸")]
+        check("窗口拖宽后内容实时重排（换行宽度变大）",
+              bool(mw_wide) and max(mw_wide) > max(mw_after),
+              "after=%s wide=%s" % (mw_after, mw_wide))
+        app.root.geometry("320x%d+200+80" % h)
+        app.root.update()
 
         # 方案二：点击标题展开详情 → 窗口变高；再点收起
         h_before = app.root.winfo_height()

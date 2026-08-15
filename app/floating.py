@@ -536,6 +536,18 @@ class FloatingApp:
                                              ("所有文件", "*.*")])
         if not path:
             return
+        # 复制到程序数据目录：保证关闭重开后背景图依然存在
+        # （外部文件可能被移动/删除/换机）
+        try:
+            import shutil as _sh
+            ext = os.path.splitext(path)[1].lower() or ".png"
+            dest_dir = os.path.join(DATA_DIR, "backgrounds")
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, "background" + ext)
+            _sh.copy2(path, dest)
+            path = dest
+        except Exception:
+            pass  # 复制失败时仍用原路径（配置里保存的是绝对路径）
         old = self.bg_image_path
         self.bg_image_path = path
         self._load_bg_image()
@@ -1170,6 +1182,7 @@ class FloatingApp:
         zone = self._edge_zone()
         if zone:
             self._mode = "resize"
+            self._user_resized = True  # 拖拽缩放立即停用自动适配，避免与内容实时重排打架
             self._resize_start = (e.x_root, e.y_root, self.root.winfo_x(), self.root.winfo_y(),
                                   self.root.winfo_width(), self.root.winfo_height(), zone)
         elif self._is_drag_area(e.widget):
@@ -1763,8 +1776,14 @@ class FloatingApp:
         if abs(e.width - self._last_canvas_w) < 4:
             return
         self._last_canvas_w = e.width
-        self._update_wraps()
-        self.root.after_idle(self._autosize)
+        # 拖拽/缩放窗口时内容随宽度实时整体重排（HTML 式自适应）：
+        # 防抖后重建列表（重新换行 + 重新布局行/倒计时/按钮位置）
+        if getattr(self, "_list_relayout_after", None) is not None:
+            try:
+                self.root.after_cancel(self._list_relayout_after)
+            except Exception:
+                pass
+        self._list_relayout_after = self.root.after(80, self._render_list)
 
     # ---------------- 界面2：画布渲染（壁纸铺满、文字置底不遮挡） ----------------
     def _font_obj(self, size, bold=False):

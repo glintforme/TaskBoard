@@ -7,6 +7,9 @@ taskboard.db-shm
 # 本地配置文件（含机器特定路径；模板见 config.example.json）
 config.json
 
+# 导入的背景图副本（程序自动复制到该目录）
+backgrounds/
+
 # ===== 测试与缓存 =====
 .test_tmp/
 __pycache__/

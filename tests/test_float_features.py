@@ -276,16 +276,22 @@ def main():
             try:
                 app.bg_image_path = ""
                 app.bg_opacity = 0.7
-                # ① 点面板上的「🖼 导入背景图片」按钮 → 选图 → 加载 + 保存配置
+                # ① 点面板上的「🖼 导入背景图片」按钮 → 选图 → 复制到数据目录 → 加载 + 保存配置
                 _tfd.askopenfilename = lambda **kw: img_path
                 btn = find_button(app.image_panel, "🖼 导入背景图片")
                 check("导入背景图片:面板按钮存在", btn is not None, "")
                 btn.invoke()
                 app.root.update()
                 check("导入背景图片:选图后成功加载", app._bg_display is not None and app._bg_item is not None, "")
+                # 图片被复制到程序数据目录（外部文件移动/删除后依然可用）
+                bg_copy = os.path.join(ROOT, "backgrounds", "background.png")
+                check("导入背景图片:已复制到数据目录",
+                      os.path.isfile(bg_copy) and os.path.normcase(app.bg_image_path) == os.path.normcase(bg_copy),
+                      "path=%s copy=%s" % (app.bg_image_path, bg_copy))
                 with open(cfg_path3, "r", encoding="utf-8") as f:
                     cfg3 = json.load(f)
-                check("导入背景图片:路径已保存到配置", cfg3.get("bg_image") == img_path,
+                check("导入背景图片:副本路径已保存到配置",
+                      os.path.normcase(cfg3.get("bg_image")) == os.path.normcase(bg_copy),
                       str(cfg3.get("bg_image")))
                 # ② 取消对话框 → 状态不变
                 _tfd.askopenfilename = lambda **kw: ""
@@ -294,7 +300,7 @@ def main():
                 check("导入背景图片:取消后保留原图", app._bg_display is not None, "")
                 with open(cfg_path3, "r", encoding="utf-8") as f:
                     cfg3b = json.load(f)
-                check("导入背景图片:取消后配置不变", cfg3b.get("bg_image") == img_path,
+                check("导入背景图片:取消后配置不变", cfg3b.get("bg_image") == cfg3.get("bg_image"),
                       str(cfg3b.get("bg_image")))
                 # ③ 选择损坏文件 → 警告 + 回退旧图
                 bad_path = os.path.join(OUT, "bad.png")
@@ -305,7 +311,8 @@ def main():
                 app._import_bg_image()
                 app.root.update()
                 check("导入背景图片:坏图弹出警告", len(warned) == 1, str(warned))
-                check("导入背景图片:坏图后回退旧图", app.bg_image_path == img_path,
+                check("导入背景图片:坏图后回退旧图",
+                      os.path.normcase(app.bg_image_path) == os.path.normcase(bg_copy),
                       str(app.bg_image_path))
             finally:
                 _tfd.askopenfilename = real_fd
@@ -314,6 +321,8 @@ def main():
                 app._load_bg_image()
                 with open(cfg_path3, "w", encoding="utf-8") as f:
                     json.dump(orig_cfg3, f, ensure_ascii=False, indent=2)
+                import shutil as _sh
+                _sh.rmtree(os.path.join(ROOT, "backgrounds"), ignore_errors=True)
 
             # ---- 3c. JPG 背景图（回归：Tk 不原生支持 JPEG，需 GDI+ 解码） ----
             jpg_path = os.path.join(OUT, "test_bg.jpg")
@@ -337,7 +346,10 @@ def main():
                               str(px))
                     with open(cfg_path3, "r", encoding="utf-8") as f:
                         cfg3c = json.load(f)
-                    check("JPG:路径已保存到配置", cfg3c.get("bg_image") == jpg_path,
+                    bg_copy_jpg = os.path.join(ROOT, "backgrounds", "background.jpg")
+                    check("JPG:副本路径已保存到配置",
+                          os.path.normcase(cfg3c.get("bg_image")) == os.path.normcase(bg_copy_jpg)
+                          and os.path.isfile(bg_copy_jpg),
                           str(cfg3c.get("bg_image")))
                     # 大图自动降采样（>800 像素）
                     big_jpg = os.path.join(OUT, "test_big.jpg")
@@ -357,6 +369,8 @@ def main():
                     app._load_bg_image()
                     with open(cfg_path3, "w", encoding="utf-8") as f:
                         json.dump(orig_cfg3c, f, ensure_ascii=False, indent=2)
+                    import shutil as _sh3
+                    _sh3.rmtree(os.path.join(ROOT, "backgrounds"), ignore_errors=True)
 
             # ---- 3d. 壁纸引擎：界面1置底不遮挡 / 界面2 / 搜索面板 / 自适应 ----
             if jpg_ok:
