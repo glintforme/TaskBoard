@@ -24,6 +24,12 @@ from db import DB
 from floating import FloatingApp, SECTION_TITLES
 from server import ApiServer
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 PASS = 0
 FAIL = 0
 
@@ -154,7 +160,9 @@ def main():
 
         titles = [app.canvas.itemcget(c, "text") for c, _, _, _ in app._wrap_labels
                   if str(app.canvas.itemcget(c, "text")).startswith(("▸", "▾"))]
-        full_ok = any("自动换行显示完整内容" in t and t.endswith("项") for t in titles)
+        # 换行/断行处可能吞掉空格：去掉换行与空格后比对完整字符（自动换行、未截断）
+        full_ok = any("自动换行显示完整内容第00项" in t.replace("\n", "").replace(" ", "")
+                      for t in titles)
         check("长标题完整显示（自动换行，未截断）", full_ok, titles[:2])
 
         # 窗口拖窄 → 标题自动重排（换行宽度变小），宽度不被强制弹回

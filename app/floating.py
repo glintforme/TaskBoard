@@ -2,8 +2,8 @@
 """桌面悬浮窗（tkinter）：
 - 折叠态：显示 日常/周常/月常 任务数与 今日完成/总完成 统计，并显示今日待完成任务标题；每 5 秒自动刷新；
 - 透明化：整窗透明度可调（默认 72%，可透见桌面）；可导入自定义背景图片（PNG/GIF/JPG，自带透明度，默认透至桌面可见）；
-  背景图作为壁纸 **cover 自适应窗口大小**（裁剪铺满、无黑边，拖拽缩放实时重采样跟随），始终**置底不遮挡内容**；
-  显示于 界面1（折叠态）/ 界面2（展开态，含任务详情）/ 搜索面板（整面板铺满），后台设置页同样显示该背景图；
+  背景图作为壁纸 **contain 自适应**（整张图片完整可见、居中，拖拽缩放实时重采样跟随、不裁切），始终**置底不遮挡内容**；
+  显示于 界面1（折叠态，随任务增多聊天框式扩大）/ 界面2（展开态，含任务详情）/ 搜索面板（最外层整面板一张，结果区不含壁纸），后台设置页同样显示该背景图；
 - 左键单击：展开/收起任务明细（每条带「完成」按钮）；点击任务标题展开完整内容；
 - 拖动：按住窗口任意位置（非按钮区域）可随意拖动；边缘 6px 内可拖拽缩放（手动调整的尺寸不会被自动适配回弹）；
   拖到屏幕右缘附近自动吸附隐藏到侧边，点击隐藏位置即可恢复原位；
@@ -406,8 +406,9 @@ class FloatingApp:
 
     # ---------------- 背景图片（统一壁纸引擎） ----------------
     def _bg_paint(self, surf):
-        """把背景图按画布大小自适应绘制到 surf（canvas），始终置底、居中、cover 裁切。
-        尺寸变化只换整数降采样因子，避免频繁重建。"""
+        """把背景图按画布大小自适应绘制到 surf（canvas），始终置底、居中。
+        contain 模式：缩放后图片整张不超出画布（完整可见、无裁切），
+        随画布尺寸变化实时重采样；尺寸变化只换整数 (zoom, subsample) 组合，避免频繁重建。"""
         canvas = surf.get("canvas")
         if canvas is None or self._bg_master is None:
             return
@@ -421,22 +422,16 @@ class FloatingApp:
         mw, mh = self._bg_master.width(), self._bg_master.height()
         if mw < 1 or mh < 1:
             return
-        # cover 缩放：保证缩放后 ≥ 画布（无黑边）。整数因子组合 (zoom, subsample)。
+        # contain：缩放后图片 ≤ 画布（整张可见）。整数因子组合 (zoom, subsample)。
         import math
         sx, sy = w / mw, h / mh
         kz, ks = 1, 1
-        if sx <= 1 and sy <= 1:
-            # 纯降采样：取能覆盖的最小整数因子
-            ks = max(1, min(mw // max(w, 1), mh // max(h, 1)))
+        if sx < 1 or sy < 1:
+            # 至少一维需要缩小 → 缩小到两维都不超过画布
+            ks = max(1, math.ceil(max(mw / max(w, 1), mh / max(h, 1))))
         else:
-            # 需要放大（至少一个维度不足）：整数 zoom 到覆盖
-            kz = max(1, min(math.ceil(max(sx, sy)), 64))
-            # 放大后若某维远大于画布，再降采样控内存（仍保持覆盖）
-            pw, ph = mw * kz, mh * kz
-            if pw > w * 2 or ph > h * 2:
-                k2 = max(1, min(pw // max(w, 1), ph // max(h, 1)))
-                if k2 > 1:
-                    ks = k2
+            # 纯放大 → 整数 zoom 不超过画布（限制内存与画质）
+            kz = max(1, min(int(min(sx, sy)), 64))
         sig = (kz, ks)
         if surf.get("factor") != sig:
             if kz > 1 or ks > 1:
@@ -724,7 +719,7 @@ class FloatingApp:
         self._search_status = cv.create_text(10, 0, anchor="nw", text="输入关键词搜索全部任务",
                                              fill=FG_DIM, font=_font(8), tags=("sch",))
 
-        # 结果区：滚动画布（壁纸铺满 + 行文本悬浮）+ 滚动条
+        # 结果区：滚动画布（纯深色底，不含背景图——背景图只保留最外层整面板一张）
         self._search_canvas = tk.Canvas(cv, bg=BG, highlightthickness=0, width=10, height=10)
         self._search_sbar = tk.Scrollbar(cv, orient="vertical", command=self._search_canvas.yview)
         self._search_canvas.configure(yscrollcommand=self._search_sbar.set)
@@ -733,12 +728,6 @@ class FloatingApp:
                                                    tags=("sch",))
         self._search_sbar_win = cv.create_window(0, 0, anchor="nw", window=self._search_sbar,
                                                  tags=("sch",))
-        self._bg_surf_search = {"canvas": self._search_canvas, "item": None,
-                                "photo": None, "factor": None}
-        self._bg_surfaces.append(self._bg_surf_search)
-        self._search_canvas.bind("<Configure>",
-                                 lambda e: (self._bg_paint(self._bg_surf_search),
-                                            self._on_search_result_configure()))
 
         # 分页：上一页/下一页为真实按钮（可点击），页标签为画布文本
         self._search_prev = tk.Button(cv, text="◀ 上一页", command=lambda: self._search_page_to(-1),
@@ -820,14 +809,6 @@ class FloatingApp:
             cv.coords(self._search_prev_win, 8, h - 26)
             cv.coords(self._search_page_lbl, w / 2, h - 16)
             cv.coords(self._search_next_win, w - 8, h - 26)
-        except Exception:
-            pass
-
-    def _on_search_result_configure(self):
-        """结果区宽度变化：壁纸重绘（行文本不受宽度影响）。"""
-        try:
-            if self._bg_surf_search is not None:
-                self._bg_paint(self._bg_surf_search)
         except Exception:
             pass
 
@@ -1101,8 +1082,6 @@ class FloatingApp:
                 ow = self._search_user_w or self.search_panel.winfo_width() \
                     or self.search_panel.winfo_reqwidth()
                 self.search_panel.geometry("+%d+%d" % (max(0, x - ow - 6), y))
-                if self._bg_surf_search is not None:
-                    self._bg_paint(self._bg_surf_search)
                 if getattr(self, "_bg_surf_search_chrome", None) is not None:
                     self._bg_paint(self._bg_surf_search_chrome)
             else:
@@ -1648,6 +1627,13 @@ class FloatingApp:
                                                      fill=ACCENT, font=_font(9, True))
         self._collapsed_cleanup.append(self._cd_header)
         y += 19
+        # 标题换行宽度：右侧预留截止倒计时
+        f9 = self._font_obj(9)
+        max_w = max(80, cw - 30 - 100)
+        # 高度上限内渲染全部待办（聊天框式：标题换行 + 窗口随数量扩大）
+        sh = self.root.winfo_screenheight()
+        max_y = int(sh * 0.8) - 46
+        shown = 0
         if not pending:
             it = self.collapsed.create_text(10, y, anchor="w",
                                             text="（无，全部完成 🎉）" if self.connected else "（—）",
@@ -1655,11 +1641,14 @@ class FloatingApp:
             self._collapsed_cleanup.append(it)
             y += 17
         else:
-            for t in pending[:10]:
-                title = t["title"]
-                if len(title) > 13:
-                    title = title[:12] + "…"
-                it = self.collapsed.create_text(10, y, anchor="w", text="• " + title,
+            for t in pending:
+                wrapped = self._wrap_text(t["title"], f9, max_w)
+                lines = wrapped.count("\n") + 1
+                row_h = lines * 17
+                if y + row_h > max_y:
+                    break
+                txt = ("• " + wrapped).replace("\n", "\n  ")
+                it = self.collapsed.create_text(10, y, anchor="nw", text=txt,
                                                 fill=FG, font=_font(9))
                 self._collapsed_cleanup.append(it)
                 eff = t.get("effective_deadline")
@@ -1672,10 +1661,11 @@ class FloatingApp:
                     cd = self.collapsed.create_text(cw - 10, y, anchor="e", text="—",
                                                     fill=FG_DIM, font=_font(8))
                     self._collapsed_cleanup.append(cd)
-                y += 17
-            if len(pending) > 10:
+                y += row_h
+                shown += 1
+            if shown < len(pending):
                 it = self.collapsed.create_text(10, y, anchor="w",
-                                                text="…还有 %d 项" % (len(pending) - 10),
+                                                text="…还有 %d 项" % (len(pending) - shown),
                                                 fill=FG_DIM, font=_font(8))
                 self._collapsed_cleanup.append(it)
                 y += 17
@@ -1695,14 +1685,15 @@ class FloatingApp:
         self._resize_collapsed()
 
     def _resize_collapsed(self):
-        """折叠态窗口高度随「今日待完成」行数自适应。
-        用户手动调整过尺寸时保持其设置（直到任务数据变化才恢复自动适配），防止回弹。"""
+        """折叠态窗口高度随「今日待完成」行数自适应（聊天框式：随任务增多扩大，
+        上限 80% 屏幕高度，超出显示剩余条数）。用户手动调整过尺寸时保持其设置
+        （直到任务数据变化才恢复自动适配），防止回弹。"""
         if self.expanded or self.docked or self._hidden_in_tray or self._user_resized:
             return
         try:
             sh = self.root.winfo_screenheight()
             h = 82 + max(1, self._pending_lines) * 17  # 表头 + 待办行 + 汇总行
-            h = min(h, int(sh * 0.6))
+            h = min(h, int(sh * 0.8))
             cur = self.root.winfo_height()
             if abs(h - cur) < 2:
                 return
@@ -1803,23 +1794,44 @@ class FloatingApp:
         return f
 
     def _wrap_text(self, text, font, max_px):
-        """按像素宽度手工换行（canvas 文本项不自动换行）。"""
-        out = []
+        """按像素宽度手工换行（canvas 文本项不自动换行）。
+        支持无空格文本（中文）逐字断行；同一词的字符片段之间不加空格。"""
+        out_lines = []
         for para in str(text).split("\n"):
             if not para.strip():
-                out.append("")
+                out_lines.append("")
                 continue
-            words = para.split(" ")
-            cur = ""
-            for w_ in words:
-                trial = (cur + " " + w_).strip() if cur else w_
-                if font.measure(trial) <= max_px or not cur:
-                    cur = trial
+            # 拆成 (片段, 与前一片段是否同词无空格) 列表；超宽单词按字符断
+            items = []
+            for word in para.split(" "):
+                if not word:
+                    continue
+                if font.measure(word) > max_px:
+                    cur = ""
+                    first = True
+                    for ch in word:
+                        if cur and font.measure(cur + ch) > max_px:
+                            items.append((cur, not first))
+                            first = False
+                            cur = ch
+                        else:
+                            cur += ch
+                    if cur:
+                        items.append((cur, not first))
                 else:
-                    out.append(cur)
-                    cur = w_
-            out.append(cur)
-        return "\n".join(out)
+                    items.append((word, False))
+            line = ""
+            for p, ns in items:
+                sep = "" if (line and ns) else (" " if line else "")
+                cand = line + sep + p
+                if line and font.measure(cand) > max_px:
+                    out_lines.append(line)
+                    line = p
+                else:
+                    line = cand
+            if line:
+                out_lines.append(line)
+        return "\n".join(out_lines)
 
     def _update_wraps(self):
         for i, entry in enumerate(self._wrap_labels):

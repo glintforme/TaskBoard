@@ -366,7 +366,7 @@ def main():
                 app.bg_opacity = 0.7
                 app._load_bg_image()
                 app.root.update()
-                # 界面1：背景图必须是最底层（不再遮挡文字/按钮）
+                # 界面1：背景图必须是最底层（不再遮挡文字/按钮），且整张完整可见（contain）
                 if app._bg_item is not None:
                     first = app.collapsed.find_all()[0]
                     check("壁纸:界面1背景图置底", first == app._bg_item,
@@ -376,11 +376,14 @@ def main():
                     check("壁纸:界面1背景图居中",
                           abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
                           "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
-                    # cover 自适应：缩放后图片不小于画布（不露底）
+                    # contain 自适应：缩放后图片 ≤ 画布（整张可见）
                     p1 = app._bg_surf_collapsed.get("photo")
-                    check("壁纸:背景图cover填充画布",
-                          p1 is not None and p1.width() >= w and p1.height() >= h,
-                          "photo=%s canvas=%s" % ((p1.width(), p1.height()) if p1 else None, (w, h)))
+                    if p1:
+                        check("壁纸:背景图整张完整可见(contain)",
+                              p1.width() <= w and p1.height() <= h,
+                              "photo=%s canvas=%s" % ((p1.width(), p1.height()), (w, h)))
+                    else:
+                        check("壁纸:背景图整张完整可见(contain)", False, "photo 未生成")
                 else:
                     check("壁纸:界面1背景图置底", False, "bg item 未创建")
                 # 界面2：展开后内层画布也有背景图且置底
@@ -395,23 +398,20 @@ def main():
                     check("壁纸:界面2背景图存在且置底", False, "expand bg 未创建")
                 app.set_expanded(False)
                 app.root.update()
-                # 搜索面板：打开后结果区也有背景图且置底
+                # 搜索面板：只保留最外层整面板一张壁纸（结果区无背景图）
                 app._toggle_panel("search")
                 app.root.update()
                 time.sleep(0.15)
                 app.root.update()
-                it3 = app._bg_surf_search.get("item")
-                if it3 is not None:
-                    first3 = app._search_canvas.find_all()[0]
-                    check("壁纸:搜索面板背景图存在且置底", first3 == it3,
-                          "first=%s bg=%s" % (first3, it3))
-                else:
-                    check("壁纸:搜索面板背景图存在且置底", False, "search bg 未创建")
                 it4 = app._bg_surf_search_chrome.get("item")
                 if it4 is not None:
                     first4 = app._search_cv.find_all()[0]
                     check("壁纸:搜索面板整面背景图置底", first4 == it4,
                           "first=%s bg=%s" % (first4, it4))
+                    # 结果区不再有内层背景图（不重叠）
+                    check("壁纸:结果区无内层背景图",
+                          len(app._search_canvas.find_withtag("__bg__")) == 0,
+                          str(app._search_canvas.find_withtag("__bg__")))
                 else:
                     check("壁纸:搜索面板整面背景图置底", False, "chrome bg 未创建")
                 app._toggle_panel("search")
@@ -427,8 +427,8 @@ def main():
                       abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
                       "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
                 p2 = app._bg_surf_collapsed.get("photo")
-                check("壁纸:缩放后重新降采样且覆盖",
-                      p2 is not None and p2.width() >= w and p2.height() >= h,
+                check("壁纸:缩放后重新降采样且整张可见",
+                      p2 is not None and p2.width() <= w and p2.height() <= h,
                       "factor=%s photo=%s canvas=%s" % (app._bg_surf_collapsed.get("factor"),
                                                         (p2.width(), p2.height()) if p2 else None, (w, h)))
                 # 移除后各面板清空
@@ -437,7 +437,6 @@ def main():
                 check("壁纸:移除后各面板清空",
                       app._bg_display is None
                       and app._bg_surf_expand.get("item") is None
-                      and app._bg_surf_search.get("item") is None
                       and app._bg_surf_search_chrome.get("item") is None, "")
 
             # ---- 4. 功能按钮（齿轮/图片/扳手，靠右）面板跟随 ----
@@ -581,12 +580,14 @@ def main():
 
             # ---- 7. 折叠态：字号与多任务显示 ----
             app.set_expanded(False)
-            # 加入 15 个今日待办
+            # 加入 15 个今日待办 + 1 个超长标题（验证聊天框式换行）
             import copy
             g3 = copy.deepcopy(app.groups)
             for i in range(15):
                 g3["today"].append({"id": 2000 + i, "title": "待办任务第 %02d 项" % i, "note": "",
                                     "due_date": "2026-08-15", "remind_at": None, "deadline": None})
+            g3["today"].append({"id": 2099, "title": "这是一个非常非常长的待办任务标题用来验证界面1聊天框式自动换行显示完整内容不截断",
+                                "note": "", "due_date": "2026-08-15", "remind_at": None, "deadline": None})
             app.q.put(("data", g3, app.stats, set()))
             app._poll_queue_once()
             app.root.update()
@@ -595,9 +596,14 @@ def main():
                            if str(app.collapsed.type(i)) == "text" and "• " in str(app.collapsed.itemcget(i, "text"))]
             check("折叠态任务标题字号为9", bool(title_items) and "9" in str(app.collapsed.itemcget(title_items[0], "font")),
                   str([app.collapsed.itemcget(i, "font") for i in title_items[:1]]))
-            check("多任务时显示前10条+剩余统计",
-                  any("还有 9 项" in t for t in txts7) and any("待办任务第 05 项" in t for t in txts7),
-                  str(txts7)[:160])
+            wrapped_titles = [app.collapsed.itemcget(i, "text") for i in title_items
+                              if "\n" in str(app.collapsed.itemcget(i, "text"))]
+            check("超长标题自动换行完整显示",
+                  bool(wrapped_titles) and "不截断" in wrapped_titles[0].replace("\n", ""),
+                  str(wrapped_titles[:1]))
+            check("多任务时窗口自动扩大显示全部待办",
+                  any("待办任务第 14 项" in t for t in txts7) and "还有" not in "|".join(txts7),
+                  str(txts7)[:200])
             check("窗口高度随多任务增高", app.root.winfo_height() >= 200, str(app.root.winfo_height()))
 
             # ---- 8. 折叠态吸附隐藏 / 点击恢复 / 还原位置 ----
