@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>悬浮任务板 · 后台设置</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%235b8cff'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'>✓</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">✓</span>
+    <div>
+      <h1>悬浮任务板</h1>
+      <p class="sub" id="todayLabel">加载中…</p>
+    </div>
+  </div>
+  <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">连接中</span></div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <a href="#today" class="tab active" data-tab="today">今日任务</a>
+  <a href="#tomorrow" class="tab" data-tab="tomorrow">明日任务</a>
+  <a href="#week" class="tab" data-tab="week">周常任务</a>
+  <a href="#month" class="tab" data-tab="month">月常任务</a>
+  <a href="#all" class="tab" data-tab="all">全部任务</a>
+  <a href="#history" class="tab" data-tab="history">历史完成</a>
+  <a href="#ai" class="tab" data-tab="ai">AI 生成</a>
+  <a href="#settings" class="tab" data-tab="settings">设置</a>
+</nav>
+
+<main>
+  <div class="stats-bar" id="statsBar">
+    <div class="stat"><span class="num" id="stToday">0</span><span class="lbl">今日完成</span></div>
+    <div class="stat"><span class="num" id="stOverdue">0</span><span class="lbl">未完成</span></div>
+    <div class="stat"><span class="num" id="stTotal">0</span><span class="lbl">总完成</span></div>
+    <div class="stat"><span class="num" id="stTasks">0</span><span class="lbl">任务总数</span></div>
+  </div>
+
+  <!-- 今日任务 -->
+  <section class="panel active" id="panel-today">
+    <div class="panel-head">
+      <h2>今日任务 <small id="todayHint"></small></h2>
+      <button class="btn ghost" onclick="gotoTab('all')">管理全部</button>
+    </div>
+    <form class="add-form" onsubmit="return addTask(event,'today')">
+      <input type="text" id="in-today" placeholder="输入今日任务，回车添加…" maxlength="120" required>
+      <input type="text" id="note-today" placeholder="备注（可选）" maxlength="200">
+      <select id="scope-today">
+        <option value="today">今日任务（仅今天）</option>
+        <option value="daily">日常任务（每天重复）</option>
+      </select>
+      <button class="btn primary" type="submit">＋ 添加</button>
+      <div class="add-meta">
+        <label>▶ 开始时间 <input type="datetime-local" id="start-today" title="不填则按添加时间开始"></label>
+        <label>🔔 提醒时间 <input type="datetime-local" id="remind-today" title="到点自动响铃提醒"></label>
+        <label>⏰ 截止时间 <input type="datetime-local" id="deadline-today" title="不填则按开始时间 24 小时后截止"></label>
+      </div>
+    </form>
+    <div id="list-today" class="task-list"></div>
+  </section>
+
+  <!-- 明日任务 -->
+  <section class="panel" id="panel-tomorrow">
+    <div class="panel-head">
+      <h2>明日任务 <small id="tomorrowHint"></small></h2>
+    </div>
+    <form class="add-form" onsubmit="return addTask(event,'tomorrow')">
+      <input type="text" id="in-tomorrow" placeholder="输入明日任务，回车添加…" maxlength="120" required>
+      <input type="text" id="note-tomorrow" placeholder="备注（可选）" maxlength="200">
+      <button class="btn primary" type="submit">＋ 添加</button>
+      <div class="add-meta">
+        <label>▶ 开始时间 <input type="datetime-local" id="start-tomorrow"></label>
+        <label>🔔 提醒时间 <input type="datetime-local" id="remind-tomorrow"></label>
+        <label>⏰ 截止时间 <input type="datetime-local" id="deadline-tomorrow"></label>
+      </div>
+    </form>
+    <div id="list-tomorrow" class="task-list"></div>
+  </section>
+
+  <!-- 周常任务 -->
+  <section class="panel" id="panel-week">
+    <div class="panel-head">
+      <h2>周常任务 <small id="weekHint"></small></h2>
+    </div>
+    <form class="add-form" onsubmit="return addTask(event,'week')">
+      <input type="text" id="in-week" placeholder="输入本周任务，回车添加…" maxlength="120" required>
+      <input type="text" id="note-week" placeholder="备注（可选）" maxlength="200">
+      <button class="btn primary" type="submit">＋ 添加</button>
+      <div class="add-meta">
+        <label>▶ 开始时间 <input type="datetime-local" id="start-week"></label>
+        <label>🔔 提醒时间 <input type="datetime-local" id="remind-week"></label>
+        <label>⏰ 截止时间 <input type="datetime-local" id="deadline-week"></label>
+      </div>
+    </form>
+    <div id="list-week" class="task-list"></div>
+  </section>
+
+  <!-- 月常任务 -->
+  <section class="panel" id="panel-month">
+    <div class="panel-head">
+      <h2>月常任务 <small id="monthHint"></small></h2>
+    </div>
+    <form class="add-form" onsubmit="return addTask(event,'month')">
+      <input type="text" id="in-month" placeholder="输入本月任务，回车添加…" maxlength="120" required>
+      <input type="text" id="note-month" placeholder="备注（可选）" maxlength="200">
+      <button class="btn primary" type="submit">＋ 添加</button>
+      <div class="add-meta">
+        <label>▶ 开始时间 <input type="datetime-local" id="start-month"></label>
+        <label>🔔 提醒时间 <input type="datetime-local" id="remind-month"></label>
+        <label>⏰ 截止时间 <input type="datetime-local" id="deadline-month"></label>
+      </div>
+    </form>
+    <div id="list-month" class="task-list"></div>
+  </section>
+
+  <!-- 全部任务 -->
+  <section class="panel" id="panel-all">
+    <div class="panel-head">
+      <h2>全部任务 <small>管理 / 删除重复设置的任务</small></h2>
+    </div>
+    <div class="toolbar">
+      <input type="text" id="in-all-q" placeholder="搜索任务标题或备注…" oninput="loadAll()">
+      <select id="all-scope" onchange="loadAll()">
+        <option value="">全部类型</option>
+        <option value="daily">日常任务</option>
+        <option value="today">今日任务</option>
+        <option value="tomorrow">明日任务</option>
+        <option value="week">周常任务</option>
+        <option value="month">月常任务</option>
+      </select>
+    </div>
+    <div id="list-all" class="task-list"></div>
+  </section>
+
+  <!-- 历史完成 -->
+  <section class="panel" id="panel-history">
+    <div class="panel-head">
+      <h2>历史完成任务 <small id="historyHint"></small></h2>
+    </div>
+    <div id="list-history" class="task-list"></div>
+  </section>
+
+  <!-- AI 生成 -->
+  <section class="panel" id="panel-ai">
+    <div class="panel-head">
+      <h2>AI 生成任务 <small>不知道今天做什么？让 AI 帮你</small></h2>
+    </div>
+    <div class="ai-card">
+      <label class="field">
+        <span>你的实际情况（工作、生活、近期目标等，越具体越好）</span>
+        <textarea id="ai-context" rows="4" placeholder="例如：我是一名程序员，最近在赶一个项目，平时晚上会去健身房，周末想学做饭……"></textarea>
+      </label>
+      <div class="ai-opts">
+        <span class="field"><label>生成范围</label>
+          <label class="chk"><input type="checkbox" id="ai-s-daily" checked> 日常</label>
+          <label class="chk"><input type="checkbox" id="ai-s-today" checked> 今日</label>
+          <label class="chk"><input type="checkbox" id="ai-s-tomorrow" checked> 明日</label>
+          <label class="chk"><input type="checkbox" id="ai-s-week" checked> 周内</label>
+          <label class="chk"><input type="checkbox" id="ai-s-month" checked> 月内</label>
+        </span>
+        <span class="field"><label>每类数量</label>
+          <input type="number" id="ai-count" min="1" max="20" value="5" class="small">
+        </span>
+        <span class="field"><label>模型</label>
+          <select id="ai-provider">
+            <option value="">自动选择（按 DeepSeek→Kimi→Gemini 顺序）</option>
+            <option value="deepseek">DeepSeek（deepseek-v4-flash）</option>
+            <option value="kimi">Kimi（kimi-k3）</option>
+            <option value="gemini">Gemini（gemini-3.7flash）</option>
+          </select>
+        </span>
+        <button class="btn primary" onclick="aiGenerate()">✨ 生成任务</button>
+      </div>
+      <div class="ai-status" id="aiStatus"></div>
+      <div id="aiResult" class="ai-result"></div>
+      <div class="ai-actions" id="aiActions" hidden>
+        <button class="btn primary" onclick="aiSaveSelected()">✓ 保存选中任务</button>
+        <button class="btn ghost" onclick="aiClear()">清空结果</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 设置 -->
+  <section class="panel" id="panel-settings">
+    <div class="panel-head"><h2>后台设置</h2></div>
+    <div class="settings-card">
+      <label class="field">
+        <span>数据库保存路径（SQLite 文件，修改后数据自动迁移）</span>
+        <input type="text" id="cfg-dbpath" placeholder="例如 D:\taskboard\taskboard.db">
+        <small>所有任务与完成记录保存在该路径的 SQLite 文件中。</small>
+      </label>
+      <label class="field">
+        <span>监听端口</span>
+        <input type="number" id="cfg-port" min="1" max="65535" value="39999">
+      </label>
+      <label class="field">
+        <span>监听地址</span>
+        <input type="text" id="cfg-host" value="0.0.0.0">
+        <small>0.0.0.0 表示同时支持本机与局域网访问（手机/平板也可打开）。</small>
+      </label>
+      <label class="field chk big">
+        <input type="checkbox" id="cfg-autostart"> 开机自启动（随 Windows 启动悬浮任务板）
+      </label>
+      <div class="lan-box" id="lanBox"></div>
+      <button class="btn primary" onclick="saveSettings()">💾 保存设置</button>
+      <p class="tip" id="cfgTip"></p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>桌面悬浮窗左键单击展开/收起任务明细，可拖动、边缘缩放；点“–”最小化到系统托盘、点“⟳”刷新；下方扳手/图片/齿轮三个圆形按钮管理全部功能。</p>
+  <p class="dim">数据保存在本地 SQLite · AI Key 从系统环境变量读取（DEEPSEEK_API_KEY / GOOGLE_API_KEY / MOONSHOT_API_KEY，openai 暂不可用）</p>
+</footer>
+
+<div id="toast" class="toast"></div>
+
+<!-- 任务编辑弹窗 -->
+<div class="modal-mask" id="editMask" onclick="if(event.target===this)closeEdit()">
+  <div class="modal" id="editModal">
+    <h3>✏️ 编辑任务</h3>
+    <label class="field"><span>任务标题</span>
+      <input type="text" id="edit-title" maxlength="120"></label>
+    <label class="field"><span>备注</span>
+      <input type="text" id="edit-note" maxlength="200"></label>
+    <label class="field"><span>类型</span>
+      <select id="edit-scope">
+        <option value="daily">日常任务（每天重复）</option>
+        <option value="today">今日任务</option>
+        <option value="tomorrow">明日任务</option>
+        <option value="week">周常任务</option>
+        <option value="month">月常任务</option>
+      </select></label>
+    <div class="add-meta">
+      <label>▶ 开始时间 <input type="datetime-local" id="edit-start" title="不填则按编辑时间开始"></label>
+      <label>⏰ 截止时间 <input type="datetime-local" id="edit-deadline" title="不填则按开始时间 24 小时后截止"></label>
+      <label>🔔 提醒时间 <input type="datetime-local" id="edit-remind"></label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeEdit()">取消</button>
+      <button class="btn primary" onclick="saveEdit()">💾 保存修改</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

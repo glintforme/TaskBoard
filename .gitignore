@@ -1,0 +1,20 @@
+# ===== 用户本地数据（请勿上传） =====
+# SQLite 任务数据库（含你的真实任务数据）
+taskboard.db
+taskboard.db-wal
+taskboard.db-shm
+
+# 本地配置文件（含机器特定路径；模板见 config.example.json）
+config.json
+
+# ===== 测试与缓存 =====
+.test_tmp/
+__pycache__/
+*.pyc
+
+# ===== 日志 =====
+*.log
+
+# ===== 系统文件 =====
+Thumbs.db
+Desktop.ini
