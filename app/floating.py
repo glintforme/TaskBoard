@@ -210,7 +210,10 @@ class FloatingApp:
         self.bg_opacity = float(cfg.get("bg_opacity", 0.70))
         self._bg_display = None
         self._bg_item = None
-        self._bg_master = None
+        self._bg_rgb = None
+        self._bg_mw = 0
+        self._bg_mh = 0
+        self._bg_after = None
         self._bg_surfaces = []
         self._btn_min_win = None
 
@@ -354,7 +357,7 @@ class FloatingApp:
             w = e.width or self.collapsed.winfo_width()
             h = e.height or self.collapsed.winfo_height()
             if self._bg_surf_collapsed is not None:
-                self._bg_paint(self._bg_surf_collapsed)
+                self._bg_schedule(self._bg_surf_collapsed)
             if self._btn_min_win is not None:
                 self.collapsed.coords(self._btn_min_win, w - 36, 10)
             if self._btn_refresh_win is not None:
@@ -406,11 +409,11 @@ class FloatingApp:
 
     # ---------------- 背景图片（统一壁纸引擎） ----------------
     def _bg_paint(self, surf):
-        """把背景图按画布大小自适应绘制到 surf（canvas），始终置底、居中。
-        cover 模式：缩放后图片 ≥ 画布（彩色图像全铺满、无黑边，溢出部分裁切），
-        随画布尺寸变化实时重采样；尺寸变化只换整数 (zoom, subsample) 组合，避免频繁重建。"""
+        """把背景图按画布大小绘制到 surf（canvas），始终置底、铺满。
+        stretch 模式（类似 HTML background-size:100% 100%）：完整图像拉伸到
+        恰好等于画布尺寸，任何窗口大小变化后都整张可见且全铺满（无黑边、无裁切）。"""
         canvas = surf.get("canvas")
-        if canvas is None or self._bg_master is None:
+        if canvas is None or self._bg_rgb is None:
             return
         try:
             w = canvas.winfo_width()
@@ -419,49 +422,25 @@ class FloatingApp:
             return
         if w < 10 or h < 10:
             return
-        mw, mh = self._bg_master.width(), self._bg_master.height()
-        if mw < 1 or mh < 1:
-            return
-        # cover：缩放后图片 ≥ 画布（铺满无黑边）。整数因子组合 (zoom, subsample)。
-        import math
-        sx, sy = w / mw, h / mh
-        kz, ks = 1, 1
-        if sx <= 1 and sy <= 1:
-            # 纯降采样：取能覆盖的最小整数因子
-            ks = max(1, min(mw // max(w, 1), mh // max(h, 1)))
-        else:
-            # 需要放大（至少一个维度不足）：整数 zoom 到覆盖
-            kz = max(1, min(math.ceil(max(sx, sy)), 64))
-            # 放大后若某维远大于画布，再降采样控内存（仍保持覆盖）
-            pw, ph = mw * kz, mh * kz
-            if pw > w * 2 or ph > h * 2:
-                k2 = max(1, min(pw // max(w, 1), ph // max(h, 1)))
-                if k2 > 1:
-                    ks = k2
-        sig = (kz, ks)
-        if surf.get("factor") != sig:
-            if kz > 1 or ks > 1:
-                p = self._bg_master
-                if kz > 1:
-                    p = p.zoom(kz, kz)
-                if ks > 1:
-                    p = p.subsample(ks, ks)
-                surf["photo"] = p
-            else:
-                surf["photo"] = self._bg_master
-            surf["factor"] = sig
+        target = (w, h)
+        if surf.get("factor") != target:
+            import winimg
+            rgb = winimg.stretch_rgb(self._bg_mw, self._bg_mh, self._bg_rgb, w, h)
+            photo = self._rgb_to_photo(rgb, w, h)
+            surf["photo"] = photo
+            surf["factor"] = target
             if surf.get("item") is not None:
                 try:
-                    canvas.itemconfigure(surf["item"], image=surf["photo"])
+                    canvas.itemconfigure(surf["item"], image=photo)
                 except tk.TclError:
                     surf["item"] = None
                     surf["factor"] = None
         try:
             if surf.get("item") is None:
-                surf["item"] = canvas.create_image(w / 2, h / 2, anchor="center",
+                surf["item"] = canvas.create_image(0, 0, anchor="nw",
                                                    image=surf["photo"], tags=("__bg__",))
             else:
-                canvas.coords(surf["item"], w / 2, h / 2)
+                canvas.coords(surf["item"], 0, 0)
         except tk.TclError:
             # 画布被整体重建（如渲染清空全部项）→ 重新创建
             surf["item"] = None
@@ -473,6 +452,30 @@ class FloatingApp:
         except Exception:
             pass
 
+    def _bg_schedule(self, surf):
+        """拖拽/缩放期间防抖重绘（50ms），避免每个 Configure 都做像素拉伸。"""
+        if getattr(self, "_bg_after", None) is not None:
+            try:
+                self.root.after_cancel(self._bg_after)
+            except Exception:
+                pass
+        self._bg_after = self.root.after(50, lambda: self._bg_paint(surf))
+
+    def _rgb_to_photo(self, rgb, w, h):
+        """RGB 字节 → 临时 PPM → PhotoImage（Tk 原生快速读取）。"""
+        import tempfile as _tf
+        fd, tmp = _tf.mkstemp(suffix=".ppm")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(b"P6\n%d %d\n255\n" % (w, h))
+                f.write(rgb)
+            return tk.PhotoImage(file=tmp)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
     def _bg_paint_all(self):
         for s in self._bg_surfaces:
             try:
@@ -482,6 +485,7 @@ class FloatingApp:
         # 兼容旧接口：_bg_item 指向折叠态画布上的背景项
         if self._bg_surf_collapsed is not None:
             self._bg_item = self._bg_surf_collapsed.get("item")
+            self._bg_display = self._bg_surf_collapsed.get("photo")
 
     def _bg_clear_all(self):
         for s in self._bg_surfaces:
@@ -494,28 +498,22 @@ class FloatingApp:
             s["photo"] = None
             s["factor"] = None
         self._bg_item = None
+        self._bg_display = None
 
     def _load_bg_image(self):
         self._bg_clear_all()
-        self._bg_master = None
-        self._bg_display = None
+        self._bg_rgb = None
+        self._bg_mw = self._bg_mh = 0
         path = self.bg_image_path
         if not path or not os.path.isfile(path):
             return
         try:
-            if path.lower().endswith((".jpg", ".jpeg", ".jpe", ".jfif")):
-                photo = self._load_jpeg(path)
-            else:
-                photo = tk.PhotoImage(file=path)
-            w, h = photo.width(), photo.height()
-            maxdim = 800
-            if max(w, h) > maxdim:
-                k = max(1, int(max(w, h) // maxdim) + (1 if max(w, h) % maxdim else 0))
-                if k > 1:
-                    photo = photo.subsample(k, k)
-            _apply_image_opacity(photo, max(0.0, min(1.0, self.bg_opacity)))
-            self._bg_master = photo
-            self._bg_display = photo
+            import winimg
+            mw, mh, rgb = winimg.decode_image(path)
+            mw, mh, rgb = winimg.fit_rgb(mw, mh, rgb)
+            rgb = winimg.blend_rgb(rgb, max(0.0, min(1.0, self.bg_opacity)))
+            self._bg_rgb = rgb
+            self._bg_mw, self._bg_mh = mw, mh
             self._bg_paint_all()
             self._on_collapsed_configure(type("E", (), {"width": 0, "height": 0})())
         except Exception as e:
@@ -526,24 +524,6 @@ class FloatingApp:
                 mb.showwarning("背景图片", "图片加载失败（仅支持 PNG / GIF / JPG / PPM 格式）：\n%s" % e,
                                parent=self.image_panel if hasattr(self, "image_panel") else self.root)
             except Exception:
-                pass
-
-    def _load_jpeg(self, path):
-        """Tk 不原生支持 JPEG：用 Windows GDI+ 解码 → 临时 PPM → PhotoImage。"""
-        import tempfile as _tf
-        import winimg
-        w, h, rgb = winimg.decode_rgb(path)
-        w, h, rgb = winimg.fit_rgb(w, h, rgb)
-        fd, tmp = _tf.mkstemp(suffix=".ppm")
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(b"P6\n%d %d\n255\n" % (w, h))
-                f.write(rgb)
-            return tk.PhotoImage(file=tmp)
-        finally:
-            try:
-                os.remove(tmp)
-            except OSError:
                 pass
 
     def _import_bg_image(self):
@@ -557,7 +537,7 @@ class FloatingApp:
         old = self.bg_image_path
         self.bg_image_path = path
         self._load_bg_image()
-        if not self._bg_display:
+        if not self._bg_rgb:
             self.bg_image_path = old
             return
         self._save_bg_config()
@@ -718,6 +698,14 @@ class FloatingApp:
             tid = cv.create_text(0, 0, text=label, font=_font(8), tags=("sch", "cat-" + val))
             cv.tag_bind("cat-" + val, "<Button-1>", lambda e, v=val: self._search_set_cat(v))
             self._cat_items[val] = (rid, tid)
+        # 初始高亮：默认「全部」选中（白字 + 高亮底），其余醒目浅色——避免画布默认黑色看不见
+        for v, (rid, tid) in self._cat_items.items():
+            if v == "":
+                cv.itemconfigure(rid, state="normal")
+                cv.itemconfigure(tid, fill="white")
+            else:
+                cv.itemconfigure(rid, state="hidden")
+                cv.itemconfigure(tid, fill=FG)
 
         # 状态文本（画布，独立于结果区，永不销毁）
         self._search_status = cv.create_text(10, 0, anchor="nw", text="输入关键词搜索全部任务",
@@ -1774,7 +1762,7 @@ class FloatingApp:
 
     def _on_canvas_configure(self, e):
         if self._bg_surf_expand is not None:
-            self._bg_paint(self._bg_surf_expand)
+            self._bg_schedule(self._bg_surf_expand)
         if not self.expanded:
             return
         if abs(e.width - self._last_canvas_w) < 4:

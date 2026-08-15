@@ -146,3 +146,100 @@ def fit_rgb(w, h, rgb, maxdim=800):
             out[pos + 2] = rgb[sx + 2]
             pos += 3
     return nw, nh, bytes(out)
+
+
+def stretch_rgb(w, h, rgb, tw, th):
+    """最近邻拉伸到 (tw, th)（类似 HTML background-size:100% 100%，完整图像全铺满）。"""
+    if w == tw and h == th:
+        return rgb
+    out = bytearray(tw * th * 3)
+    pos = 0
+    for y in range(th):
+        sy = min((y * h) // th, h - 1) * w * 3
+        for x in range(tw):
+            sx = sy + min((x * w) // tw, w - 1) * 3
+            out[pos] = rgb[sx]
+            out[pos + 1] = rgb[sx + 1]
+            out[pos + 2] = rgb[sx + 2]
+            pos += 3
+    return bytes(out)
+
+
+def blend_rgb(rgb, factor, base=(30, 34, 44)):
+    """按 factor 向底色混合（模拟透明度，factor=1 为原图）。"""
+    if factor >= 0.999:
+        return rgb
+    out = bytearray(len(rgb))
+    b0, b1, b2 = base
+    f = float(factor)
+    for i in range(0, len(rgb), 3):
+        out[i] = int(rgb[i] * f + b0 * (1 - f))
+        out[i + 1] = int(rgb[i + 1] * f + b1 * (1 - f))
+        out[i + 2] = int(rgb[i + 2] * f + b2 * (1 - f))
+    return bytes(out)
+
+
+def decode_ppm(path):
+    """解析 PPM/PGM（P6/P5/P3/P2），返回 (w, h, rgb_bytes)。GDI+ 不支持 PPM。"""
+    with open(path, "rb") as f:
+        data = f.read()
+    pos = 0
+
+    def token():
+        nonlocal pos
+        while pos < len(data) and data[pos] in b" \t\r\n":
+            if data[pos] == 35:  # '#'
+                while pos < len(data) and data[pos] not in b"\r\n":
+                    pos += 1
+            else:
+                pos += 1
+        start = pos
+        while pos < len(data) and data[pos] not in b" \t\r\n":
+            pos += 1
+        return data[start:pos]
+
+    magic = token()
+    if magic not in (b"P2", b"P3", b"P5", b"P6"):
+        raise ValueError("不是 PPM/PGM 文件: %s" % magic)
+    w = int(token())
+    h = int(token())
+    maxv = int(token())
+    while pos < len(data) and data[pos] in b" \t\r\n":
+        pos += 1
+    if magic == b"P6":
+        body = data[pos:pos + w * h * 3]
+        if len(body) < w * h * 3:
+            raise ValueError("P6 数据不完整")
+        return w, h, body
+    if magic == b"P5":
+        body = data[pos:pos + w * h]
+        if len(body) < w * h:
+            raise ValueError("P5 数据不完整")
+        out = bytearray(w * h * 3)
+        for i, v in enumerate(body):
+            out[i * 3] = out[i * 3 + 1] = out[i * 3 + 2] = v
+        return w, h, bytes(out)
+    # 文本 P3/P2
+    vals = []
+    while len(vals) < w * h * (3 if magic == b"P3" else 1):
+        t = token()
+        if not t:
+            raise ValueError("文本 PPM 数据不完整")
+        vals.append(int(t))
+    if magic == b"P2":
+        vals = [v for v in vals for _ in range(3)]
+    out = bytearray(len(vals))
+    for i, v in enumerate(vals):
+        out[i] = min(255, max(0, int(v * 255 / max(1, maxv))))
+    return w, h, bytes(out)
+
+
+def decode_image(path):
+    """通用解码：GDI+ 优先（PNG/GIF/JPG/BMP 等），失败回退 PPM/PGM 解析。"""
+    try:
+        return decode_rgb(path)
+    except Exception:
+        ext = os.path.splitext(path)[1].lower()
+        if ext in (".ppm", ".pgm", ".pnm"):
+            return decode_ppm(path)
+        raise

@@ -366,28 +366,30 @@ def main():
                 app.bg_opacity = 0.7
                 app._load_bg_image()
                 app.root.update()
-                # 界面1：背景图必须是最底层（不遮挡文字/按钮），且 cover 铺满（无黑边）
+                # 界面1：背景图必须是最底层（不遮挡文字/按钮），且整张拉伸铺满（完整图像全铺满）
                 if app._bg_item is not None:
                     first = app.collapsed.find_all()[0]
                     check("壁纸:界面1背景图置底", first == app._bg_item,
                           "first=%s bg=%s" % (first, app._bg_item))
                     cx, cy = app.collapsed.coords(app._bg_item)
                     w, h = app.collapsed.winfo_width(), app.collapsed.winfo_height()
-                    check("壁纸:界面1背景图居中",
-                          abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
-                          "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
-                    # cover 铺满：缩放后图片 ≥ 画布（彩色图像全铺满、无黑边）
+                    check("壁纸:界面1背景图铺满定位(0,0)",
+                          abs(cx) < 1 and abs(cy) < 1,
+                          "%s,%s" % (cx, cy))
+                    # 整张拉伸铺满：图片恰好等于画布尺寸（完整图像、无黑边、无裁切）
                     p1 = app._bg_surf_collapsed.get("photo")
                     if p1:
-                        check("壁纸:背景图cover铺满无黑边",
-                              p1.width() >= w and p1.height() >= h,
+                        check("壁纸:背景图整张铺满画布",
+                              p1.width() == w and p1.height() == h,
                               "photo=%s canvas=%s" % ((p1.width(), p1.height()), (w, h)))
                     else:
-                        check("壁纸:背景图cover铺满无黑边", False, "photo 未生成")
+                        check("壁纸:背景图整张铺满画布", False, "photo 未生成")
                 else:
                     check("壁纸:界面1背景图置底", False, "bg item 未创建")
-                # 界面2：展开后内层画布也有背景图且置底（同样 cover 铺满）
+                # 界面2：展开后内层画布也有背景图且置底（同样整张铺满）
                 app.set_expanded(True)
+                app.root.update()
+                time.sleep(0.15)  # 等待防抖重绘（50ms）以最终画布尺寸完成拉伸
                 app.root.update()
                 it2 = app._bg_surf_expand.get("item")
                 if it2 is not None:
@@ -396,8 +398,8 @@ def main():
                           "first=%s bg=%s" % (first2, it2))
                     cw2, ch2 = app.canvas.winfo_width(), app.canvas.winfo_height()
                     p2x = app._bg_surf_expand.get("photo")
-                    check("壁纸:界面2背景图cover铺满",
-                          p2x is not None and p2x.width() >= cw2 and p2x.height() >= ch2,
+                    check("壁纸:界面2背景图整张铺满",
+                          p2x is not None and p2x.width() == cw2 and p2x.height() == ch2,
                           "photo=%s canvas=%s" % ((p2x.width(), p2x.height()) if p2x else None, (cw2, ch2)))
                 else:
                     check("壁纸:界面2背景图存在且置底", False, "expand bg 未创建")
@@ -415,19 +417,19 @@ def main():
                                                  app._search_canvas.find_withtag("__bg__")))
                 app._toggle_panel("search")
                 app.root.update()
-                # 自适应：改变窗口大小 → 背景图随画布重新居中且重新降采样
+                # 自适应：改变窗口大小 → 背景图重新拉伸到恰好铺满新画布
                 app.root.geometry("380x220")
                 app.root.update()
-                time.sleep(0.1)
+                time.sleep(0.15)  # 等待防抖重绘
                 app.root.update()
                 cx, cy = app.collapsed.coords(app._bg_item)
                 w, h = app.collapsed.winfo_width(), app.collapsed.winfo_height()
                 check("壁纸:窗口缩放后背景图随动",
-                      abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
-                      "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
+                      abs(cx) < 1 and abs(cy) < 1,
+                      "%s,%s" % (cx, cy))
                 p3 = app._bg_surf_collapsed.get("photo")
-                check("壁纸:缩放后重新降采样且铺满",
-                      p3 is not None and p3.width() >= w and p3.height() >= h,
+                check("壁纸:缩放后重新拉伸且铺满",
+                      p3 is not None and p3.width() == w and p3.height() == h,
                       "factor=%s photo=%s canvas=%s" % (app._bg_surf_collapsed.get("factor"),
                                                         (p3.width(), p3.height()) if p3 else None, (w, h)))
                 # 移除后各面板清空
@@ -875,6 +877,12 @@ def main():
                   app._panel_open["search"] and app.search_panel.state() != "withdrawn", "")
             check("打开自动加载全部任务", app._search_state["total"] > 0,
                   str(app._search_state["total"]))
+            # 分类初始即醒目可见（默认选中「全部」白字，其余浅色，非黑色）
+            cat_fills = {v: str(app._search_cv.itemcget(tid, "fill")) for v, (rid, tid) in app._cat_items.items()}
+            check("分类初始醒目可见(非黑色)",
+                  cat_fills.get("") == "white"
+                  and all(cf not in ("black", "") for cf in cat_fills.values()),
+                  str(cat_fills))
             rx = app.root.winfo_x()
             sx = app.search_panel.winfo_x()
             sw2 = app.search_panel.winfo_width()
