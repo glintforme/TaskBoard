@@ -38,7 +38,9 @@ except ImportError:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # app/
 PROJECT_ROOT = os.path.dirname(BASE_DIR)                        # 项目根目录
-CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
+# 打包（PyInstaller）后：配置放在 exe 旁边，保证数据持久
+DATA_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else PROJECT_ROOT
+CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 
 BG = "#20242e"
 BG2 = "#2a2f3c"

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import socket
+import sys
 import threading
 import traceback
 import webbrowser
@@ -17,7 +18,12 @@ from db import DB, SCOPES, SCOPE_LABELS, month_range, today_str, week_range
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # app/
 PROJECT_ROOT = os.path.dirname(BASE_DIR)                        # 项目根目录
-WEB_DIR = os.path.join(PROJECT_ROOT, "web")
+# 打包（PyInstaller）后：网页资源在解压目录 _MEIPASS/web，配置在 exe 旁边
+if getattr(sys, "frozen", False):
+    WEB_DIR = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)), "web")
+else:
+    WEB_DIR = os.path.join(PROJECT_ROOT, "web")
+DATA_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else PROJECT_ROOT
 
 
 def get_lan_ips():
@@ -48,7 +54,7 @@ class ApiServer:
         self.log = log or (lambda *a: None)
         self.httpd = None
         self.thread = None
-        self.config_path = config.get("_config_path") or os.path.join(PROJECT_ROOT, "config.json")
+        self.config_path = config.get("_config_path") or os.path.join(DATA_DIR, "config.json")
 
     # ---------- 生命周期 ----------
     def start(self):
