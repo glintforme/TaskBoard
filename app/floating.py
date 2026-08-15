@@ -2,8 +2,8 @@
 """桌面悬浮窗（tkinter）：
 - 折叠态：显示 日常/周常/月常 任务数与 今日完成/总完成 统计，并显示今日待完成任务标题；每 5 秒自动刷新；
 - 透明化：整窗透明度可调（默认 72%，可透见桌面）；可导入自定义背景图片（PNG/GIF/JPG，自带透明度，默认透至桌面可见）；
-  背景图作为壁纸**自适应窗口大小**（cover 缩放 + 居中，随窗口缩放跟随），始终**置底不遮挡内容**；
-  显示于 界面1（折叠态）/ 界面2（展开态）/ 搜索面板，后台设置页同样显示该背景图；
+  背景图作为壁纸 **cover 自适应窗口大小**（裁剪铺满、无黑边，拖拽缩放实时重采样跟随），始终**置底不遮挡内容**；
+  显示于 界面1（折叠态）/ 界面2（展开态，含任务详情）/ 搜索面板（整面板铺满），后台设置页同样显示该背景图；
 - 左键单击：展开/收起任务明细（每条带「完成」按钮）；点击任务标题展开完整内容；
 - 拖动：按住窗口任意位置（非按钮区域）可随意拖动；边缘 6px 内可拖拽缩放（手动调整的尺寸不会被自动适配回弹）；
   拖到屏幕右缘附近自动吸附隐藏到侧边，点击隐藏位置即可恢复原位；
@@ -180,13 +180,15 @@ class FloatingApp:
         self._resize_start = None
         self._fs_state = False
         self._row_widgets = {}
-        self._row_countdowns = {}  # 任务 id -> (Label, effective_deadline)，行内截止倒计时
+        self._row_countdowns = {}  # 任务 id -> (画布项, effective_deadline)，行内截止倒计时
+        self._wrap_labels = []
+        self._list_content_h = 0
+        self._fonts = {}
         self._loading = False
         self._no_drag = set()
         self._row_detail = {}
         self._section_open = {"today": True, "tomorrow": False, "week": False, "month": False}
         self._close_noask_var = None
-        self._wrap_labels = []
         self._last_canvas_w = 0
         self._list_sig = None
         self._pending_lines = 1
@@ -340,9 +342,6 @@ class FloatingApp:
         self.canvas.configure(yscrollcommand=self.vbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.vbar.pack(side="right", fill="y")
-        self.list_frame = tk.Frame(self.canvas, bg=BG)
-        self._list_win = self.canvas.create_window((0, 0), window=self.list_frame, anchor="nw")
-        self.list_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self._bg_surf_expand = {"canvas": self.canvas, "item": None,
                                 "photo": None, "factor": None}
@@ -422,12 +421,34 @@ class FloatingApp:
         mw, mh = self._bg_master.width(), self._bg_master.height()
         if mw < 1 or mh < 1:
             return
-        k = 1
-        if mw > w or mh > h:
-            k = max(1, min(mw // w, mh // h))
-        if surf.get("factor") != k:
-            surf["photo"] = self._bg_master.subsample(k, k) if k > 1 else self._bg_master
-            surf["factor"] = k
+        # cover 缩放：保证缩放后 ≥ 画布（无黑边）。整数因子组合 (zoom, subsample)。
+        import math
+        sx, sy = w / mw, h / mh
+        kz, ks = 1, 1
+        if sx <= 1 and sy <= 1:
+            # 纯降采样：取能覆盖的最小整数因子
+            ks = max(1, min(mw // max(w, 1), mh // max(h, 1)))
+        else:
+            # 需要放大（至少一个维度不足）：整数 zoom 到覆盖
+            kz = max(1, min(math.ceil(max(sx, sy)), 64))
+            # 放大后若某维远大于画布，再降采样控内存（仍保持覆盖）
+            pw, ph = mw * kz, mh * kz
+            if pw > w * 2 or ph > h * 2:
+                k2 = max(1, min(pw // max(w, 1), ph // max(h, 1)))
+                if k2 > 1:
+                    ks = k2
+        sig = (kz, ks)
+        if surf.get("factor") != sig:
+            if kz > 1 or ks > 1:
+                p = self._bg_master
+                if kz > 1:
+                    p = p.zoom(kz, kz)
+                if ks > 1:
+                    p = p.subsample(ks, ks)
+                surf["photo"] = p
+            else:
+                surf["photo"] = self._bg_master
+            surf["factor"] = sig
             if surf.get("item") is not None:
                 try:
                     canvas.itemconfigure(surf["item"], image=surf["photo"])
@@ -660,86 +681,78 @@ class FloatingApp:
         except tk.TclError:
             pass
         p.configure(bg=BG2, highlightthickness=1, highlightbackground="#3a4152")
-        body = tk.Frame(p, bg=BG2)
-        body.pack(fill="both", expand=True, padx=8, pady=8)
+        # 全画布布局：背景壁纸铺满整面板，各内容项悬浮其上
+        cv = tk.Canvas(p, bg=BG2, highlightthickness=0)
+        cv.pack(fill="both", expand=True)
+        self._search_cv = cv
+        self._bg_surf_search_chrome = {"canvas": cv, "item": None, "photo": None, "factor": None}
+        self._bg_surfaces.append(self._bg_surf_search_chrome)
 
-        # 标题行 + X 关闭
-        top_row = tk.Frame(body, bg=BG2)
-        top_row.pack(fill="x")
-        tk.Label(top_row, text="🔍 搜索任务", bg=BG2, fg=ACCENT, font=_font(9, True)).pack(side="left")
-        btn_x = tk.Label(top_row, text="✕", bg=BG2, fg=FG_DIM, font=_font(10, True),
-                         padx=6, cursor="hand2")
-        btn_x.pack(side="right")
-        btn_x.bind("<Button-1>", lambda e: self._close_search_panel())
-        btn_x.bind("<Enter>", lambda e: btn_x.configure(fg=RED))
-        btn_x.bind("<Leave>", lambda e: btn_x.configure(fg=FG_DIM))
-        self._search_close_btn = btn_x
-        self._search_input = tk.Entry(top_row, bg=BG, fg=FG, insertbackground=FG,
+        # 顶部标题 + X 关闭（画布文本）
+        cv.create_text(10, 6, anchor="nw", text="🔍 搜索任务", fill=ACCENT,
+                       font=_font(9, True), tags=("sch",))
+        self._search_close_item = cv.create_text(0, 6, anchor="ne", text="✕", fill=FG_DIM,
+                                                 font=_font(10, True), tags=("sch",))
+        cv.tag_bind(self._search_close_item, "<Button-1>", lambda e: self._close_search_panel())
+
+        # 输入框（真实控件）+ 搜索按钮（画布）
+        self._search_input = tk.Entry(cv, bg=BG, fg=FG, insertbackground=FG,
                                       relief="flat", font=_font(9))
-        self._search_input.pack(side="left", fill="x", expand=True, padx=(8, 0))
         self._search_input.bind("<Return>", lambda e: self._search_go())
         self._search_input.bind("<KeyRelease>", self._on_search_key)
-        tk.Button(top_row, text="搜索", command=self._search_go, bg=ACCENT, fg="white",
-                  relief="flat", font=_font(9), padx=8, pady=2, cursor="hand2"
-                  ).pack(side="left", padx=(6, 0))
+        self._search_entry_win = cv.create_window(0, 0, anchor="nw", window=self._search_input,
+                                                  tags=("sch",))
+        self._search_go_bg = cv.create_rectangle(0, 0, 0, 0, fill=ACCENT, outline="", tags=("sch",))
+        self._search_go_txt = cv.create_text(0, 0, text="搜 索", fill="white",
+                                             font=_font(9, True), tags=("sch",))
+        cv.tag_bind(self._search_go_txt, "<Button-1>", lambda e: self._search_go())
+        cv.tag_bind(self._search_go_bg, "<Button-1>", lambda e: self._search_go())
 
-        # 分类（4×2 网格，随面板宽度自适应拉伸换行）
-        cats = [("", "全部"), ("daily", "日常"), ("today", "今日"), ("tomorrow", "明日"),
-                ("week", "周常"), ("month", "月常"), ("done", "已完成"), ("undone", "未完成")]
-        cat_row = tk.Frame(body, bg=BG2)
-        cat_row.pack(fill="x", pady=(6, 4))
+        # 分类 4×2（画布文本 + 高亮底块，随面板宽度自适应均分）
+        self._search_cats = [("", "全部"), ("daily", "日常"), ("today", "今日"), ("tomorrow", "明日"),
+                             ("week", "周常"), ("month", "月常"), ("done", "已完成"), ("undone", "未完成")]
         self._search_cat = ""
-        self._cat_buttons = {}
-        for i, (val, label) in enumerate(cats):
-            b = tk.Label(cat_row, text=label, bg=ACCENT if val == "" else BG2,
-                         fg="white" if val == "" else FG, font=_font(8), pady=2,
-                         cursor="hand2")
-            b.grid(row=i // 4, column=i % 4, sticky="ew", padx=2, pady=1)
-            b.bind("<Button-1>", lambda e, v=val: self._search_set_cat(v))
-            self._cat_buttons[val] = b
-        for c in range(4):
-            cat_row.grid_columnconfigure(c, weight=1, uniform="cat")
+        self._cat_items = {}
+        for i, (val, label) in enumerate(self._search_cats):
+            rid = cv.create_rectangle(0, 0, 0, 0, fill=ACCENT, outline="", state="hidden",
+                                      tags=("sch", "cat-" + val))
+            tid = cv.create_text(0, 0, text=label, font=_font(8), tags=("sch", "cat-" + val))
+            cv.tag_bind("cat-" + val, "<Button-1>", lambda e, v=val: self._search_set_cat(v))
+            self._cat_items[val] = (rid, tid)
 
-        # 状态标签（独立于结果区，永不销毁）
-        self._search_status = tk.Label(body, text="输入关键词搜索全部任务", bg=BG2, fg=FG_DIM,
-                                       font=_font(8), anchor="w", padx=4, pady=2)
-        self._search_status.pack(fill="x")
-        # 结果区：可滚动（内容自适应，翻页可查看全部）
-        self._search_result_wrap = tk.Frame(body, bg=BG)
-        self._search_result_wrap.pack(fill="both", expand=True, pady=(2, 4))
-        self._search_canvas = tk.Canvas(self._search_result_wrap, bg=BG, highlightthickness=0,
-                                        width=10, height=10)
-        self._search_sbar = tk.Scrollbar(self._search_result_wrap, orient="vertical",
-                                         command=self._search_canvas.yview)
+        # 状态文本（画布，独立于结果区，永不销毁）
+        self._search_status = cv.create_text(10, 0, anchor="nw", text="输入关键词搜索全部任务",
+                                             fill=FG_DIM, font=_font(8), tags=("sch",))
+
+        # 结果区：滚动画布（壁纸铺满 + 行文本悬浮）+ 滚动条
+        self._search_canvas = tk.Canvas(cv, bg=BG, highlightthickness=0, width=10, height=10)
+        self._search_sbar = tk.Scrollbar(cv, orient="vertical", command=self._search_canvas.yview)
         self._search_canvas.configure(yscrollcommand=self._search_sbar.set)
-        self._search_canvas.pack(side="left", fill="both", expand=True)
-        self._search_sbar.pack(side="right", fill="y")
+        self._search_canvas.bind("<MouseWheel>", self._on_search_wheel)
+        self._search_canvas_win = cv.create_window(0, 0, anchor="nw", window=self._search_canvas,
+                                                   tags=("sch",))
+        self._search_sbar_win = cv.create_window(0, 0, anchor="nw", window=self._search_sbar,
+                                                 tags=("sch",))
         self._bg_surf_search = {"canvas": self._search_canvas, "item": None,
                                 "photo": None, "factor": None}
         self._bg_surfaces.append(self._bg_surf_search)
-        self._search_result = tk.Frame(self._search_canvas, bg=BG)
-        self._search_result_win = self._search_canvas.create_window(
-            (0, 0), window=self._search_result, anchor="nw")
-        self._search_result.bind("<Configure>",
-                                 lambda e: self._search_canvas.configure(scrollregion=self._search_canvas.bbox("all")))
         self._search_canvas.bind("<Configure>",
-                                 lambda e: (self._search_canvas.itemconfigure(self._search_result_win, width=e.width),
-                                            self._bg_paint(self._bg_surf_search)))
-        self._search_canvas.bind("<MouseWheel>", self._on_search_wheel)
+                                 lambda e: (self._bg_paint(self._bg_surf_search),
+                                            self._on_search_result_configure()))
 
-        # 分页
-        pager = tk.Frame(body, bg=BG2)
-        pager.pack(fill="x", pady=(2, 0))
-        self._search_prev = tk.Button(pager, text="◀ 上一页", command=lambda: self._search_page_to(-1),
+        # 分页：上一页/下一页为真实按钮（可点击），页标签为画布文本
+        self._search_prev = tk.Button(cv, text="◀ 上一页", command=lambda: self._search_page_to(-1),
                                       bg=BG, fg=FG, relief="flat", font=_font(8), padx=6, pady=2,
                                       cursor="hand2")
-        self._search_prev.pack(side="left")
-        self._search_page_lbl = tk.Label(pager, text="第 1/1 页", bg=BG2, fg=FG_DIM, font=_font(8))
-        self._search_page_lbl.pack(side="left", expand=True)
-        self._search_next = tk.Button(pager, text="下一页 ▶", command=lambda: self._search_page_to(1),
+        self._search_prev_win = cv.create_window(0, 0, anchor="nw", window=self._search_prev,
+                                                 tags=("sch",))
+        self._search_page_lbl = cv.create_text(0, 0, text="第 1/1 页", fill=FG_DIM, font=_font(8),
+                                               tags=("sch",))
+        self._search_next = tk.Button(cv, text="下一页 ▶", command=lambda: self._search_page_to(1),
                                       bg=BG, fg=FG, relief="flat", font=_font(8), padx=6, pady=2,
                                       cursor="hand2")
-        self._search_next.pack(side="left")
+        self._search_next_win = cv.create_window(0, 0, anchor="nw", window=self._search_next,
+                                                 tags=("sch",))
         self._search_state = {"page": 1, "pages": 1, "total": 0}
         self._search_req_id = 0      # 请求序号：丢弃过期响应（快速切换分类/搜索时防串扰）
         self._search_after = None    # 即时搜索防抖
@@ -747,12 +760,15 @@ class FloatingApp:
         self._search_user_w = None   # 用户手动调整过的面板宽度（保持）
         # 冻结面板尺寸：尺寸完全由 wm geometry 控制（边框缩放可靠生效），初始取自然尺寸
         p.pack_propagate(False)
+        cv.bind("<Configure>", self._on_search_cv_configure)
+        # 面板自身边框缩放（与悬浮窗互不影响）：所有控件按下都用根坐标判定边缘
+        for w2 in (p, cv, self._search_canvas, self._search_sbar, self._search_input,
+                   self._search_prev, self._search_next):
+            w2.bind("<ButtonPress-1>", self._panel_press)
+            w2.bind("<B1-Motion>", self._panel_motion)
+            w2.bind("<ButtonRelease-1>", self._panel_release)
         p.update_idletasks()
-        p.geometry("%dx%d" % (max(320, p.winfo_reqwidth()), max(280, p.winfo_reqheight())))
-        # 面板自身边框缩放（与悬浮窗互不影响）
-        p.bind("<ButtonPress-1>", self._panel_press)
-        p.bind("<B1-Motion>", self._panel_motion)
-        p.bind("<ButtonRelease-1>", self._panel_release)
+        p.geometry("%dx%d" % (max(320, p.winfo_reqwidth() or 320), max(280, p.winfo_reqheight() or 280)))
         p.withdraw()
         self.search_panel = p
 
@@ -761,12 +777,69 @@ class FloatingApp:
         self._panel_open["search"] = False
         self._sync_panels()
 
+    def _on_search_cv_configure(self, e):
+        """搜索面板布局：各元素随面板尺寸自适应摆放（背景壁纸铺满整面板）。"""
+        try:
+            cv = self._search_cv
+            w = e.width or cv.winfo_width()
+            h = e.height or cv.winfo_height()
+            if self._bg_surf_search_chrome is not None:
+                self._bg_paint(self._bg_surf_search_chrome)
+            if w < 60 or h < 80:
+                return
+            cv.coords(self._search_close_item, w - 8, 6)
+            # 输入行：输入框 + 搜索按钮
+            btn_w = 58
+            iw = max(60, w - 16 - btn_w - 6)
+            cv.coords(self._search_entry_win, 8, 28)
+            cv.itemconfigure(self._search_entry_win, width=iw, height=24)
+            cv.coords(self._search_go_bg, 8 + iw + 6, 27, 8 + iw + 6 + btn_w, 51)
+            cv.coords(self._search_go_txt, 8 + iw + 6 + btn_w / 2, 39)
+            # 分类 4×2：随宽度均分
+            cw4 = (w - 16) / 4.0
+            for i, (val, label) in enumerate(self._search_cats):
+                rid, tid = self._cat_items[val]
+                col = i % 4
+                row = i // 4
+                x0 = 8 + col * cw4
+                y0 = 56 + row * 22
+                cv.coords(rid, x0 + 2, y0, x0 + cw4 - 2, y0 + 18)
+                cv.coords(tid, x0 + cw4 / 2, y0 + 9)
+            # 状态文本
+            cv.coords(self._search_status, 10, 104)
+            # 结果区：状态下方到分页上方
+            top_y = 108
+            pager_h = 32
+            rw = max(60, w - 16)
+            rh = max(40, h - top_y - pager_h - 6)
+            cv.coords(self._search_canvas_win, 8, top_y)
+            cv.itemconfigure(self._search_canvas_win, width=rw - 12, height=rh)
+            cv.coords(self._search_sbar_win, 8 + rw - 12, top_y)
+            cv.itemconfigure(self._search_sbar_win, height=rh)
+            # 分页
+            cv.coords(self._search_prev_win, 8, h - 26)
+            cv.coords(self._search_page_lbl, w / 2, h - 16)
+            cv.coords(self._search_next_win, w - 8, h - 26)
+        except Exception:
+            pass
+
+    def _on_search_result_configure(self):
+        """结果区宽度变化：壁纸重绘（行文本不受宽度影响）。"""
+        try:
+            if self._bg_surf_search is not None:
+                self._bg_paint(self._bg_surf_search)
+        except Exception:
+            pass
+
     def _panel_press(self, e):
-        """面板边框按下：进入缩放（仅当鼠标位于面板边缘）。"""
+        """面板边框按下：进入缩放（仅当鼠标位于面板边缘，用根坐标判定，任意子控件均可）。"""
         if self.search_panel.state() == "withdrawn":
             self.search_panel.deiconify()  # 防御：隐藏状态下按下面板先显示
         self._panel_resize = None
-        x, y = e.x, e.y
+        px = self.search_panel.winfo_rootx()
+        py = self.search_panel.winfo_rooty()
+        x = e.x_root - px
+        y = e.y_root - py
         w = self.search_panel.winfo_width()
         h = self.search_panel.winfo_height()
         zone = ""
@@ -824,8 +897,14 @@ class FloatingApp:
 
     def _search_set_cat(self, val):
         self._search_cat = val
-        for v, b in self._cat_buttons.items():
-            b.configure(bg=ACCENT if v == val else BG2, fg="white" if v == val else FG)
+        cv = self._search_cv
+        for v, (rid, tid) in self._cat_items.items():
+            if v == val:
+                cv.itemconfigure(rid, state="normal")
+                cv.itemconfigure(tid, fill="white")
+            else:
+                cv.itemconfigure(rid, state="hidden")
+                cv.itemconfigure(tid, fill=FG)
         self._search_state["page"] = 1
         self._search_go()
 
@@ -842,7 +921,7 @@ class FloatingApp:
     def _search_fetch(self, q, page):
         self._search_req_id += 1
         req_id = self._search_req_id
-        self._search_status.configure(text="搜索中…")
+        self._search_cv.itemconfigure(self._search_status, text="搜索中…", fill=FG_DIM)
         import urllib.parse as up
 
         def work():
@@ -859,31 +938,38 @@ class FloatingApp:
     def _search_render(self, r):
         try:
             if r.get("error"):
-                self._search_status.configure(text="搜索失败：" + r["error"], fg=RED)
+                self._search_cv.itemconfigure(self._search_status,
+                                              text="搜索失败：" + r["error"], fill=RED)
                 return
-            for w in self._search_result.winfo_children():
-                w.destroy()
+            for i in list(self._search_canvas.find_withtag("srow")):
+                self._search_canvas.delete(i)
             tasks = r.get("tasks") or []
             self._search_state.update({"page": r.get("page", 1), "pages": r.get("pages", 1),
                                        "total": r.get("total", 0)})
             if not tasks:
-                self._search_status.configure(text="未找到匹配任务", fg=FG_DIM)
+                self._search_cv.itemconfigure(self._search_status, text="未找到匹配任务", fill=FG_DIM)
             else:
-                self._search_status.configure(text="")
+                self._search_cv.itemconfigure(self._search_status, text="", fill=FG_DIM)
+                y = 2
                 for t in tasks:
                     done = bool(t.get("done_count"))
-                    row = tk.Frame(self._search_result, bg=BG)
-                    row.pack(fill="x", padx=2, pady=1)
                     title = t["title"]
                     if len(title) > 14:
                         title = title[:13] + "…"
                     txt = ("✓ " if done else "○ ") + title
-                    tk.Label(row, text=txt, bg=BG, fg=DONE if done else FG, font=_font(8),
-                             anchor="w", justify="left").pack(side="left", fill="x", expand=True)
+                    self._search_canvas.create_text(8, y, anchor="nw", text=txt,
+                                                    fill=DONE if done else FG, font=_font(8),
+                                                    tags=("srow",))
                     if done and t.get("last_completed_at"):
                         ct = str(t["last_completed_at"])[:16].replace("T", " ")
-                        tk.Label(row, text=ct, bg=BG, fg=FG_DIM, font=_font(7)).pack(side="right")
-            self._search_page_lbl.configure(text="第 %d/%d 页 · 共 %d 条" % (
+                        self._search_canvas.create_text(0, y, anchor="ne", text=ct,
+                                                        fill=FG_DIM, font=_font(7), tags=("srow",))
+                    y += 18
+            try:
+                self._search_canvas.configure(scrollregion=self._search_canvas.bbox("srow"))
+            except Exception:
+                pass
+            self._search_cv.itemconfigure(self._search_page_lbl, text="第 %d/%d 页 · 共 %d 条" % (
                 self._search_state["page"], self._search_state["pages"], self._search_state["total"]))
             self._search_prev.configure(state="normal" if self._search_state["page"] > 1 else "disabled")
             self._search_next.configure(state="normal" if self._search_state["page"] < self._search_state["pages"] else "disabled")
@@ -1017,6 +1103,8 @@ class FloatingApp:
                 self.search_panel.geometry("+%d+%d" % (max(0, x - ow - 6), y))
                 if self._bg_surf_search is not None:
                     self._bg_paint(self._bg_surf_search)
+                if getattr(self, "_bg_surf_search_chrome", None) is not None:
+                    self._bg_paint(self._bg_surf_search_chrome)
             else:
                 self.search_panel.withdraw()
         except Exception:
@@ -1694,7 +1782,6 @@ class FloatingApp:
         return max(80, self._wrap_width() - (95 if has_cd else 0))
 
     def _on_canvas_configure(self, e):
-        self.canvas.itemconfigure(self._list_win, width=e.width)
         if self._bg_surf_expand is not None:
             self._bg_paint(self._bg_surf_expand)
         if not self.expanded:
@@ -1705,12 +1792,52 @@ class FloatingApp:
         self._update_wraps()
         self.root.after_idle(self._autosize)
 
+    # ---------------- 界面2：画布渲染（壁纸铺满、文字置底不遮挡） ----------------
+    def _font_obj(self, size, bold=False):
+        key = (size, bold)
+        f = self._fonts.get(key)
+        if f is None:
+            import tkinter.font as tkfont
+            f = tkfont.Font(root=self.root, font=_font(size, bold))
+            self._fonts[key] = f
+        return f
+
+    def _wrap_text(self, text, font, max_px):
+        """按像素宽度手工换行（canvas 文本项不自动换行）。"""
+        out = []
+        for para in str(text).split("\n"):
+            if not para.strip():
+                out.append("")
+                continue
+            words = para.split(" ")
+            cur = ""
+            for w_ in words:
+                trial = (cur + " " + w_).strip() if cur else w_
+                if font.measure(trial) <= max_px or not cur:
+                    cur = trial
+                else:
+                    out.append(cur)
+                    cur = w_
+            out.append(cur)
+        return "\n".join(out)
+
     def _update_wraps(self):
-        for lbl, has_cd in self._wrap_labels:
+        for i, entry in enumerate(self._wrap_labels):
+            item, has_cd, max_w, raw = entry
+            new_w = self._row_wrap_width(has_cd) if has_cd else max(80, self._wrap_width() - 14)
+            if new_w == max_w:
+                continue
             try:
-                lbl.configure(wraplength=self._row_wrap_width(has_cd))
+                font = self._font_obj(9 if has_cd else 8)
+                wrapped = self._wrap_text(raw, font, new_w)
+                self.canvas.itemconfigure(item, text=wrapped)
+                self._wrap_labels[i] = (item, has_cd, new_w, raw)
             except tk.TclError:
                 pass
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox("content"))
+        except Exception:
+            pass
 
     def _autosize(self):
         if not self.expanded or self._hidden_in_tray or self.docked or self._user_resized:
@@ -1724,7 +1851,7 @@ class FloatingApp:
             x, y = self.root.winfo_x(), self.root.winfo_y()
             hdr_h = 30
             sum_h = self.summary_lbl.winfo_reqheight() or 24
-            content = self.list_frame.winfo_reqheight() or 100
+            content = self._list_content_h or 100
             h = hdr_h + sum_h + content + 18
             h = min(max(h, 220), int(sh * 0.85))
             if (w, h) == (self.root.winfo_width(), self.root.winfo_height()):
@@ -1735,37 +1862,54 @@ class FloatingApp:
             pass
 
     def _render_list(self):
-        for w in self.list_frame.winfo_children():
-            w.destroy()
+        for tag in ("row", "sec"):
+            for i in list(self.canvas.find_withtag(tag)):
+                try:
+                    self.canvas.delete(i)
+                except Exception:
+                    pass
         self._row_widgets = {}
         self._row_countdowns = {}
         self._wrap_labels = []
+        self._list_content_h = 0
         s = self.stats or {}
         self.summary_lbl.configure(text="今日完成 %d · 总完成 %d" % (
             s.get("today_completed", 0), s.get("total_completed", 0)))
 
+        cw = self.canvas.winfo_width() or 320
+        y = 6
         empty = True
         for key, title in SECTION_TITLES:
             items = self.groups.get(key, [])
             open_ = self._section_open.get(key, key == "today")
             marker = "▾ " if open_ else "▸ "
-            hdr = tk.Label(self.list_frame, text="%s%s (%d)" % (marker, title, len(items)),
-                           bg=BG2, fg=ACCENT, font=_font(9, True), anchor="w", padx=10, pady=4,
-                           cursor="hand2")
-            hdr.pack(fill="x", pady=(6, 0))
-            hdr.bind("<Button-1>", lambda e, k=key: self._toggle_section(k))
+            y += 6
+            self.canvas.create_text(10, y, anchor="nw", text="%s%s (%d)" % (marker, title, len(items)),
+                                    fill=ACCENT, font=_font(9, True),
+                                    tags=("sec", "sec-" + key, "content"))
+            try:
+                self.canvas.itemconfigure("sec-" + key, cursor="hand2")
+            except tk.TclError:
+                pass
+            self.canvas.tag_bind("sec-" + key, "<Button-1>",
+                                 lambda e, k=key: self._toggle_section(k))
+            y += 22
             if not items:
                 continue
             empty = False
             if open_:
                 for t in items:
-                    self._make_row(t, completed=t["id"] in self.done_today)
-
+                    y = self._make_row(t, y, cw, completed=t["id"] in self.done_today)
         if empty:
-            tip = tk.Label(self.list_frame, text="还没有任务，点下方功能按钮 →「打开后台设置页面」\n"
-                                                 "或在设置页用 AI 一键生成任务",
-                           bg=BG, fg=FG_DIM, font=_font(9), justify="left", padx=14, pady=10)
-            tip.pack(fill="x")
+            self.canvas.create_text(14, y + 4, anchor="nw",
+                                    text="还没有任务，点下方功能按钮 →「打开后台设置页面」\n或在设置页用 AI 一键生成任务",
+                                    fill=FG_DIM, font=_font(9), tags=("row", "content"))
+            y += 40
+        self._list_content_h = max(60, y)
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox("content"))
+        except Exception:
+            pass
         self._autosize()
 
     def _toggle_section(self, key):
@@ -1777,7 +1921,7 @@ class FloatingApp:
         self._row_detail[task_id] = not self._row_detail.get(task_id, False)
         self._render_list()
 
-    def _make_row(self, task, completed=False):
+    def _make_row(self, task, y, cw, completed=False):
         tid = task["id"]
         expanded = self._row_detail.get(tid, False)
         overdue = bool(task.get("effective_deadline")) and \
@@ -1785,56 +1929,72 @@ class FloatingApp:
         has_cd = bool(task.get("effective_deadline")) and not completed \
             and task.get("scope") != "daily"
         wrap = self._row_wrap_width(has_cd)
-        row = tk.Frame(self.list_frame, bg=BG)
-        row.pack(fill="x", padx=8, pady=2)
-        col = tk.Frame(row, bg=BG)
-        col.pack(side="left", fill="x", expand=True)
-
         title = task["title"]
         marker = "▾ " if expanded else "▸ "
-        t_lbl = tk.Label(col, text=marker + ("⚠ " if overdue else "") + title, bg=BG,
-                         fg=RED if overdue else (FG if not completed else FG_DIM),
-                         font=_font(9), anchor="w", justify="left",
-                         wraplength=wrap, cursor="hand2")
-        t_lbl.pack(fill="x")
-        t_lbl.bind("<Button-1>", lambda e, t=tid: self._toggle_row_detail(tid))
-        self._wrap_labels.append((t_lbl, has_cd))
-
-        if expanded:
-            det = tk.Frame(col, bg=BG)
-            det.pack(fill="x", padx=(6, 0), pady=(1, 3))
-            self._make_detail(det, task, completed, wrap)
-
-        btn = tk.Button(row, text="✓ 已完成" if completed else "完 成",
-                        bg=DONE if completed else ACCENT, fg="white", relief="flat",
-                        font=_font(8), bd=0, padx=8, pady=2, cursor="hand2",
-                        activebackground=DONE if completed else "#3f6fd8",
-                        state="disabled" if completed else "normal",
-                        command=lambda t=tid: self._complete(t))
-        btn.pack(side="right", padx=(6, 0), pady=2)
-        # 任务行右侧：截止倒计时（h:m:s，无天数不显示天）
+        txt = marker + ("⚠ " if overdue else "") + title
+        f9 = self._font_obj(9)
+        title_txt = self._wrap_text(txt, f9, wrap)
+        lines = title_txt.count("\n") + 1
+        row_h = max(22, lines * 18 + 8)
+        item = self.canvas.create_text(10, y, anchor="nw", text=title_txt,
+                                       fill=RED if overdue else (FG if not completed else FG_DIM),
+                                       font=_font(9), tags=("row", "row-" + str(tid), "content"))
+        try:
+            self.canvas.itemconfigure(item, cursor="hand2")
+        except tk.TclError:
+            pass
+        self.canvas.tag_bind("row-" + str(tid), "<Button-1>",
+                             lambda e, t=tid: self._toggle_row_detail(t))
+        self._wrap_labels.append((item, has_cd, wrap, txt))
+        # 右侧完成按钮（画布矩形 + 文本）
+        right = cw - 8
+        btn_w = 52
+        btn_x0 = right - btn_w
+        btn_col = DONE if completed else ACCENT
+        btn_txt = "✓ 已完成" if completed else "完 成"
+        btag = "btn-" + str(tid)
+        self.canvas.create_rectangle(btn_x0, y + 3, right, y + 21,
+                                     fill=btn_col, outline="", tags=("row", btag, "content"))
+        self.canvas.create_text(btn_x0 + btn_w / 2, y + 12, text=btn_txt,
+                                fill="white", font=_font(8), tags=("row", btag, "content"))
+        if not completed:
+            self.canvas.tag_bind(btag, "<Button-1>", lambda e, t=tid: self._complete(t))
+        self._row_widgets[tid] = {"btn": btag, "title": item, "y": y}
+        # 右侧截止倒计时（右对齐文本）
         if has_cd:
-            # 固定宽度 + 右对齐：文本变化不触发行回流重排（大量任务时避免卡顿）
-            cd = tk.Label(row, text="⏰ --:--:--", bg=BG, fg=WARN, font=_font(8),
-                          padx=2, width=11, anchor="e")
-            cd.pack(side="right", padx=(4, 2), pady=2)
+            cd = self.canvas.create_text(btn_x0 - 6, y + 3, anchor="ne", text="⏰ --:--:--",
+                                         fill=WARN, font=_font(8),
+                                         tags=("row", "cd-" + str(tid), "content"))
             self._row_countdowns[tid] = (cd, task.get("effective_deadline"), None)
-        self._row_widgets[tid] = (btn, row)
+        if expanded:
+            y = self._make_detail(tid, task, y + row_h, wrap, completed)
+        else:
+            y += row_h
+        return y
 
     def _update_row_countdowns(self):
-        """任务行右侧截止倒计时（每秒刷新）：仅更新可视区标签、文本变化时才写，
-        截止时间解析缓存，固定宽度标签避免重排——大量任务下不卡顿。"""
+        """任务行右侧截止倒计时（每秒刷新）：仅更新可视区项、文本变化时才写，
+        截止时间解析缓存——大量任务下不卡顿。"""
         try:
             now = datetime.now()
+            try:
+                top = self.canvas.canvasy(0)
+                bottom = top + (self.canvas.winfo_height() or 0)
+            except Exception:
+                top, bottom = 0, 10 ** 9
             for tid, entry in list(self._row_countdowns.items()):
-                lbl, eff, dt = entry
+                item, eff, dt = entry
                 if dt is None:
                     try:
                         dt = datetime.fromisoformat(str(eff).replace(" ", "T"))
                     except (ValueError, TypeError):
                         continue
-                    self._row_countdowns[tid] = (lbl, eff, dt)
-                if not lbl.winfo_ismapped():  # 可视区外跳过（滚动到可见后 1 秒内自动校正）
+                    self._row_countdowns[tid] = (item, eff, dt)
+                try:
+                    bb = self.canvas.bbox(item)
+                except tk.TclError:
+                    continue
+                if not bb or bb[3] < top or bb[1] > bottom:  # 可视区外跳过
                     continue
                 delta = dt - now
                 if delta.total_seconds() <= 0:
@@ -1847,15 +2007,14 @@ class FloatingApp:
                     else:
                         text = "⏰ %02d:%02d:%02d" % (hh, mm, ss)
                     fg = WARN
-                if lbl.cget("text") != text:
-                    lbl.configure(text=text, fg=fg)
+                if str(self.canvas.itemcget(item, "text")) != text:
+                    self.canvas.itemconfigure(item, text=text, fill=fg)
         except Exception:
             pass
 
-    def _make_detail(self, parent, task, completed, wrap=None):
+    def _make_detail(self, tid, task, y, wrap, completed=False):
         overdue = bool(task.get("effective_deadline")) and \
             task["effective_deadline"] < datetime_now_str() and not completed
-        wrap = wrap or self._wrap_width()
         lines = []
         if task.get("note"):
             lines.append(("💬 " + task["note"], FG_DIM))
@@ -1868,11 +2027,14 @@ class FloatingApp:
             lines.append((("🔔 提醒 " + task["remind_at"]).replace("T", " "), FG_DIM))
         if not lines:
             lines.append(("（无备注与时间设置）", FG_DIM))
+        f8 = self._font_obj(8)
         for text, color in lines:
-            lbl = tk.Label(parent, text=text, bg=BG, fg=color, font=_font(8),
-                           anchor="w", justify="left", wraplength=wrap)
-            lbl.pack(fill="x", pady=1)
-            self._wrap_labels.append((lbl, False))
+            wrapped = self._wrap_text(text, f8, wrap)
+            item = self.canvas.create_text(16, y, anchor="nw", text=wrapped, fill=color,
+                                           font=_font(8), tags=("row", "det-" + str(tid), "content"))
+            self._wrap_labels.append((item, False, wrap, text))
+            y += (wrapped.count("\n") + 1) * 16 + 2
+        return y
 
     def _complete(self, task_id):
         def work():

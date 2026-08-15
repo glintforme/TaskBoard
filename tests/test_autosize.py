@@ -146,20 +146,20 @@ def main():
     def step2():
         app.root.update_idletasks()
         w, h = app.root.winfo_width(), app.root.winfo_height()
-        content = app.list_frame.winfo_reqheight()
+        content = app._list_content_h
         cap = int(app.root.winfo_screenheight() * 0.85)
         check("窗口高度自适应内容（含85%上限）", h >= min(content + 30, cap) - 5,
               "h=%d content=%d cap=%d" % (h, content, cap))
         check("窗口高度未超过85%屏幕", h <= cap + 5, str(h))
 
-        titles = [c.cget("text") for c, _ in app._wrap_labels
-                  if c.cget("text").startswith("▸") or c.cget("text").startswith("▾")]
+        titles = [app.canvas.itemcget(c, "text") for c, _, _, _ in app._wrap_labels
+                  if str(app.canvas.itemcget(c, "text")).startswith(("▸", "▾"))]
         full_ok = any("自动换行显示完整内容" in t and t.endswith("项") for t in titles)
         check("长标题完整显示（自动换行，未截断）", full_ok, titles[:2])
 
-        # 窗口拖窄 → 标签自动重排（换行宽度变小），宽度不被强制弹回
-        wl_before = {id(c): c.cget("wraplength") for c, _ in app._wrap_labels
-                     if c.cget("text").startswith("▸")}
+        # 窗口拖窄 → 标题自动重排（换行宽度变小），宽度不被强制弹回
+        wl_before = {c: mw for c, _, mw, _ in app._wrap_labels
+                     if str(app.canvas.itemcget(c, "text")).startswith("▸")}
         app.root.geometry("240x%d+200+80" % h)
         for _ in range(40):
             app.root.update()
@@ -168,11 +168,11 @@ def main():
             time.sleep(0.02)
         app.root.update()
         win_w = app.root.winfo_width()
-        wl_after = {id(c): c.cget("wraplength") for c, _ in app._wrap_labels
-                    if c.cget("text").startswith("▸")}
+        wl_after = {c: mw for c, _, mw, _ in app._wrap_labels
+                    if str(app.canvas.itemcget(c, "text")).startswith("▸")}
         check("窗口拖窄后宽度保持用户设置(240)", win_w <= 250, "win_w=%d" % win_w)
         narrowed = any(wl_after.get(k, wl_before.get(k, 0)) < wl_before.get(k, 1e9) for k in wl_before)
-        check("窗口拖窄后标签自动重排（换行宽度变小）", narrowed,
+        check("窗口拖窄后标题自动重排（换行宽度变小）", narrowed,
               "before=%s after=%s" % (wl_before, wl_after))
 
         # 方案二：点击标题展开详情 → 窗口变高；再点收起

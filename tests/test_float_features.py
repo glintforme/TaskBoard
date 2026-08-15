@@ -158,6 +158,16 @@ def collect_texts(widget):
     return out
 
 
+def search_row_texts(app):
+    """收集搜索面板结果区画布上的行文本。"""
+    return [app._search_canvas.itemcget(i, "text") for i in app._search_canvas.find_withtag("srow")]
+
+
+def search_page_text(app):
+    """读取搜索面板分页标签文本（画布项）。"""
+    return app._search_cv.itemcget(app._search_page_lbl, "text")
+
+
 def main():
     global PASS, FAIL
     print("== 悬浮窗新功能自测 ==")
@@ -397,6 +407,13 @@ def main():
                           "first=%s bg=%s" % (first3, it3))
                 else:
                     check("壁纸:搜索面板背景图存在且置底", False, "search bg 未创建")
+                it4 = app._bg_surf_search_chrome.get("item")
+                if it4 is not None:
+                    first4 = app._search_cv.find_all()[0]
+                    check("壁纸:搜索面板整面背景图置底", first4 == it4,
+                          "first=%s bg=%s" % (first4, it4))
+                else:
+                    check("壁纸:搜索面板整面背景图置底", False, "chrome bg 未创建")
                 app._toggle_panel("search")
                 app.root.update()
                 # 自适应：改变窗口大小 → 背景图随画布重新居中且重新降采样
@@ -410,17 +427,18 @@ def main():
                       abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
                       "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
                 p2 = app._bg_surf_collapsed.get("photo")
-                check("壁纸:缩放后重新降采样",
-                      p2 is not None and app._bg_surf_collapsed.get("factor", 1) >= 2,
-                      "factor=%s photo=%s" % (app._bg_surf_collapsed.get("factor"),
-                                              (p2.width(), p2.height()) if p2 else None))
+                check("壁纸:缩放后重新降采样且覆盖",
+                      p2 is not None and p2.width() >= w and p2.height() >= h,
+                      "factor=%s photo=%s canvas=%s" % (app._bg_surf_collapsed.get("factor"),
+                                                        (p2.width(), p2.height()) if p2 else None, (w, h)))
                 # 移除后各面板清空
                 app._remove_bg_image()
                 app.root.update()
                 check("壁纸:移除后各面板清空",
                       app._bg_display is None
                       and app._bg_surf_expand.get("item") is None
-                      and app._bg_surf_search.get("item") is None, "")
+                      and app._bg_surf_search.get("item") is None
+                      and app._bg_surf_search_chrome.get("item") is None, "")
 
             # ---- 4. 功能按钮（齿轮/图片/扳手，靠右）面板跟随 ----
             app._sync_panels()
@@ -657,7 +675,7 @@ def main():
             app._row_detail[9002] = True
             app._render_list()
             app.root.update()
-            labels = [c.cget("text") for c, _ in app._wrap_labels]
+            labels = [app.canvas.itemcget(c, "text") for c, _, _, _ in app._wrap_labels]
             check("展开详情显示开始时间", any("开始" in t for t in labels), str(labels))
             check("展开详情显示截止时间", any("截止" in t for t in labels), str(labels))
             check("展开详情显示备注", any("备注内容" in t for t in labels), str(labels))
@@ -686,13 +704,13 @@ def main():
             cds = app._row_countdowns
             check("任务行有截止倒计时", 9101 in cds and 9102 in cds, str(list(cds.keys())))
             check("日常任务无行内倒计时", 9103 not in cds, "")
-            lbl1 = cds[9101][0].cget("text")
+            lbl1 = app.canvas.itemcget(cds[9101][0], "text")
             check("无天数时格式为 h:m:s", bool(_re.fullmatch(r"⏰ \d{2}:\d{2}:\d{2}", lbl1)), lbl1)
-            lbl2 = cds[9102][0].cget("text")
+            lbl2 = app.canvas.itemcget(cds[9102][0], "text")
             check("逾期显示已逾期", "已逾期" in lbl2, lbl2)
             time.sleep(1.1)
             app.root.update()
-            lbl1b = cds[9101][0].cget("text")
+            lbl1b = app.canvas.itemcget(cds[9101][0], "text")
             check("行倒计时每秒刷新", lbl1b != lbl1, "%s -> %s" % (lbl1, lbl1b))
 
             # 详情展开时倒计时不被遮挡：文本换行宽度 ≤ 倒计时左侧可用宽度
@@ -711,17 +729,21 @@ def main():
             app.root.update()
             cd, _eff, _dt = app._row_countdowns.get(9201, (None, None, None))
             if cd:
-                row = cd.master
-                btns = [w for w in row.winfo_children() if isinstance(w, tk.Button)]
-                check("倒计时在按钮左侧不被遮挡",
-                      cd.winfo_x() + cd.winfo_width() <= btns[0].winfo_x() + 1,
-                      "cd_right=%d btn_x=%d" % (cd.winfo_x() + cd.winfo_width(), btns[0].winfo_x()))
-                avail = cd.winfo_x() - 8
-                note_wraps = [c.cget("wraplength") for c, _ in app._wrap_labels
-                              if str(c.cget("text")).startswith("💬")]
-                check("详情文本换行适配（不遮挡倒计时）",
-                      bool(note_wraps) and max(note_wraps) <= avail + 1,
-                      "wrap=%s avail=%d" % (note_wraps, avail))
+                cdb = app.canvas.bbox(cd)
+                btns = app.canvas.find_withtag("btn-9201")
+                if cdb and btns:
+                    bbb = app.canvas.bbox(btns[0])
+                    check("倒计时在按钮左侧不被遮挡",
+                          cdb[2] <= bbb[0] + 1,
+                          "cd_right=%d btn_x=%d" % (cdb[2], bbb[0]))
+                    avail = cdb[0] - 8
+                    note_wraps = [mw for c, hc, mw, raw in app._wrap_labels
+                                  if str(app.canvas.itemcget(c, "text")).startswith("💬")]
+                    check("详情文本换行适配（不遮挡倒计时）",
+                          bool(note_wraps) and max(note_wraps) <= avail + 1,
+                          "wrap=%s avail=%d" % (note_wraps, avail))
+                else:
+                    check("倒计时在按钮左侧不被遮挡", False, "未找到倒计时/按钮")
             else:
                 check("倒计时在按钮左侧不被遮挡", False, "未找到倒计时")
 
@@ -794,17 +816,18 @@ def main():
             app.root.update()
             check("今日分区默认展开", app._section_open["today"] is True, "")
             check("明日分区默认收起", app._section_open["tomorrow"] is False, "")
-            hdr_labels = [w for w in app.list_frame.winfo_children()
-                          if isinstance(w, tk.Label)
-                          and (w.cget("text").startswith("▸") or w.cget("text").startswith("▾"))]
-            tom_hdr = next((w for w in hdr_labels if "明日任务" in w.cget("text")), None)
+            hdr_labels = [app.canvas.itemcget(i, "text") for i in app.canvas.find_withtag("sec")]
+            check("分区标题渲染", any("今日任务" in t for t in hdr_labels)
+                  and any("明日任务" in t for t in hdr_labels), str(hdr_labels))
+            tom_hdr = next((i for i in app.canvas.find_withtag("sec")
+                            if "明日任务" in app.canvas.itemcget(i, "text")), None)
             if tom_hdr:
-                n_before = len(app.list_frame.winfo_children())
-                tom_hdr.event_generate("<Button-1>")
+                n_before = len(app.canvas.find_withtag("row")) + len(app.canvas.find_withtag("sec"))
+                app._toggle_section("tomorrow")
                 app.root.update()
                 check("点击分区标题展开该块", app._section_open["tomorrow"] is True
-                      and len(app.list_frame.winfo_children()) > n_before,
-                      "before=%d after=%d" % (n_before, len(app.list_frame.winfo_children())))
+                      and len(app.canvas.find_withtag("row")) + len(app.canvas.find_withtag("sec")) > n_before,
+                      "before=%d after=%d" % (n_before, len(app.canvas.find_withtag("row")) + len(app.canvas.find_withtag("sec"))))
                 app._toggle_section("tomorrow")
                 app.root.update()
                 check("再次点击分区收起", app._section_open["tomorrow"] is False)
@@ -826,8 +849,8 @@ def main():
             app.root.update()
             cds120 = list(app._row_countdowns.values())
             check("大量任务均有倒计时", len(cds120) == 120, str(len(cds120)))
-            w = cds120[0][0].cget("width")
-            check("倒计时标签固定宽度(文本变化不回流)", bool(w) and int(w) >= 10, "width=%r" % w)
+            cd_ok = all(isinstance(c, int) for c, _, _ in cds120)
+            check("大量任务倒计时为画布项", cd_ok, "")
             t0 = time.time()
             app._update_row_countdowns()
             app.root.update()
@@ -861,31 +884,31 @@ def main():
             ], "page": 1, "pages": 1, "total": 2}))
             app._poll_queue_once()
             app.root.update()
-            res_texts = collect_texts(app._search_result)
+            res_texts = search_row_texts(app)
             check("搜索结果显示未完成标记", any("○" in t and "未完成任务A" in t for t in res_texts), str(res_texts))
             check("搜索结果显示完成标记+时间",
                   any("✓" in t and "已完成任务B" in t for t in res_texts)
                   and any("10:30" in t for t in res_texts), str(res_texts))
             check("未完成任务不显示时间", not any("未完成任务A" in t and ":" in t for t in res_texts), str(res_texts))
-            check("搜索分页信息显示", "第 1/1 页" in app._search_page_lbl.cget("text"),
-                  app._search_page_lbl.cget("text"))
+            check("搜索分页信息显示", "第 1/1 页" in search_page_text(app),
+                  search_page_text(app))
             # 过期响应（旧请求序号）应被丢弃
             app.q.put(("search", 999999, {"tasks": [
                 {"id": 9, "title": "过期响应任务", "scope": "today", "done_count": 0,
                  "last_completed_at": None}], "page": 1, "pages": 1, "total": 1}))
             app._poll_queue_once()
             app.root.update()
-            stale_texts = collect_texts(app._search_result)
+            stale_texts = search_row_texts(app)
             check("过期搜索响应被丢弃", "过期响应任务" not in str(stale_texts), str(stale_texts))
             # 分类筛选：点击「今日」→ 只显示今日任务
             app._search_set_cat("today")
             for _ in range(30):
                 app.root.update()
-                if app._search_state["total"] > 0 and "今日" in app._search_page_lbl.cget("text"):
+                if app._search_state["total"] > 0 and "今日" in search_page_text(app):
                     break
                 time.sleep(0.1)
             app.root.update()
-            cat_texts = collect_texts(app._search_result)
+            cat_texts = search_row_texts(app)
             check("点击分类筛选生效(只显示今日)",
                   any("周报" in t for t in cat_texts) and not any("晨跑" in t for t in cat_texts),
                   str(cat_texts))
@@ -893,7 +916,7 @@ def main():
             app._search_set_cat("")
             for _ in range(30):
                 app.root.update()
-                if "全部" in app._search_page_lbl.cget("text") or app._search_state["total"] > 0:
+                if "全部" in search_page_text(app) or app._search_state["total"] > 0:
                     break
                 time.sleep(0.1)
             app.root.update()
@@ -908,11 +931,11 @@ def main():
             for _ in range(40):
                 app.root.update()
                 if app._search_req_id > req_before and \
-                        not any("周报" in t for t in collect_texts(app._search_result)):
+                        not any("周报" in t for t in search_row_texts(app)):
                     break
                 time.sleep(0.1)
             app.root.update()
-            live_texts = collect_texts(app._search_result)
+            live_texts = search_row_texts(app)
             check("搜索栏即时搜索生效（新请求已渲染、旧结果被替换）",
                   any("晨跑" in t for t in live_texts) and not any("周报" in t for t in live_texts),
                   str(live_texts))
@@ -1002,7 +1025,7 @@ def main():
             app._poll_queue_once()
             app.root.update()
             app.search_panel.update_idletasks()
-            rows12 = app._search_result.winfo_children()
+            rows12 = app._search_canvas.find_withtag("srow")
             check("结果区渲染全部12行", len(rows12) == 12, str(len(rows12)))
             frac = app._search_canvas.yview()
             check("结果区可滚动(内容超出视口)", frac[0] == 0.0 and frac[1] < 1.0, str(frac))
