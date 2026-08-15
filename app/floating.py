@@ -713,18 +713,22 @@ class FloatingApp:
                                              fill=FG_DIM, font=_font(8), tags=("sch",))
         self._search_rows_start = 0   # 结果区首行 y（由布局计算）
 
-        # 分页：上一页/下一页为真实按钮（可点击），页标签为画布文本
+        # 分页：上一页/下一页为醒目按钮（放在面板最下端，始终可见易点击），页标签为画布文本
         self._search_prev = tk.Button(cv, text="◀ 上一页", command=lambda: self._search_page_to(-1),
-                                      bg=BG, fg=FG, relief="flat", font=_font(8), padx=6, pady=2,
-                                      cursor="hand2")
+                                      bg=ACCENT, fg="white", activebackground="#3f6fd8",
+                                      activeforeground="white", disabledforeground="#8fa3c9",
+                                      relief="flat", font=_font(8, True), padx=8, pady=3,
+                                      cursor="hand2", takefocus=0)
         self._search_prev_win = cv.create_window(0, 0, anchor="nw", window=self._search_prev,
                                                  tags=("sch",))
-        self._search_page_lbl = cv.create_text(0, 0, text="第 1/1 页", fill=FG_DIM, font=_font(8),
-                                               tags=("sch",))
+        self._search_page_lbl = cv.create_text(0, 0, text="第 1/1 页 · 共 0 条", fill=FG_DIM,
+                                               font=_font(8), tags=("sch",))
         self._search_next = tk.Button(cv, text="下一页 ▶", command=lambda: self._search_page_to(1),
-                                      bg=BG, fg=FG, relief="flat", font=_font(8), padx=6, pady=2,
-                                      cursor="hand2")
-        self._search_next_win = cv.create_window(0, 0, anchor="nw", window=self._search_next,
+                                      bg=ACCENT, fg="white", activebackground="#3f6fd8",
+                                      activeforeground="white", disabledforeground="#8fa3c9",
+                                      relief="flat", font=_font(8, True), padx=8, pady=3,
+                                      cursor="hand2", takefocus=0)
+        self._search_next_win = cv.create_window(0, 0, anchor="ne", window=self._search_next,
                                                  tags=("sch",))
         self._search_state = {"page": 1, "pages": 1, "total": 0, "page_size": 8}
         self._search_req_id = 0      # 请求序号：丢弃过期响应（快速切换分类/搜索时防串扰）

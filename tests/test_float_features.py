@@ -1090,6 +1090,21 @@ def main():
             check("第2页显示后续任务", len(rows2) == ps, "rows=%d expect=%d" % (len(rows2), ps))
             st_real = dict(app._search_state)
             check("多页自动生成(总任务多→页数>1)", st_real.get("pages", 1) >= 2, str(st_real))
+            # 上一页/下一页按钮放在面板最下端且完整可见（不藏在右侧/被边缘遮挡）
+            px = app.search_panel.winfo_rootx()
+            pw = app.search_panel.winfo_width()
+            py = app.search_panel.winfo_rooty()
+            ph = app.search_panel.winfo_height()
+            nx, nw = app._search_next.winfo_rootx(), app._search_next.winfo_width()
+            ny = app._search_next.winfo_rooty()
+            vx, vw = app._search_prev.winfo_rootx(), app._search_prev.winfo_width()
+            vy = app._search_prev.winfo_rooty()
+            check("下一页按钮完整可见于面板下端",
+                  nx >= px and nx + nw <= px + pw + 1 and ny >= py + ph - 40,
+                  "next=(%d..%d) panel=(%d..%d) y=%d h=%d" % (nx, nx + nw, px, px + pw, ny - py, ph))
+            check("上一页按钮完整可见于面板下端",
+                  vx >= px and vx + vw <= px + pw + 1 and vy >= py + ph - 40,
+                  "prev=(%d..%d) panel=(%d..%d)" % (vx, vx + vw, px, px + pw))
             app._toggle_panel("search")
             app.root.update()
             app._toggle_panel("search")
