@@ -539,9 +539,30 @@ function setTimeDefaults() {
   });
 }
 
+// ---------------- 背景图片（壁纸） ----------------
+async function applyBg() {
+  try {
+    const bg = $("bgimg");
+    if (!bg) return;
+    const c = await api("/api/config");
+    const cfg = c.config || {};
+    if (cfg.bg_image) {
+      bg.style.backgroundImage = "url('/api/bg')";
+      const op = Math.min(1, Math.max(0.1, parseFloat(cfg.bg_opacity) || 0.7));
+      // 图片越透明 → 遮罩越深，保证正文可读
+      bg.style.setProperty("--bgdim", String(Math.max(0.12, 1 - op * 0.78)));
+      bg.classList.add("on");
+    } else {
+      bg.classList.remove("on");
+      bg.style.backgroundImage = "none";
+    }
+  } catch (e) { /* 服务未连接时静默 */ }
+}
+
 // ---------------- 启动 ----------------
 function init() {
   setTimeDefaults();
+  applyBg();
   $("todayLabel").textContent = "今天是 " + fmtCN(new Date());
   $("todayHint").textContent = "（" + TODAY + "）";
   $("tomorrowHint").textContent = "（" + TOMORROW + "）";

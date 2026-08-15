@@ -348,6 +348,80 @@ def main():
                     with open(cfg_path3, "w", encoding="utf-8") as f:
                         json.dump(orig_cfg3c, f, ensure_ascii=False, indent=2)
 
+            # ---- 3d. 壁纸引擎：界面1置底不遮挡 / 界面2 / 搜索面板 / 自适应 ----
+            if jpg_ok:
+                big_jpg = os.path.join(OUT, "test_big.jpg")
+                make_jpg(big_jpg, 1600, 1200, (80, 160, 240))
+                app.bg_image_path = big_jpg
+                app.bg_opacity = 0.7
+                app._load_bg_image()
+                app.root.update()
+                # 界面1：背景图必须是最底层（不再遮挡文字/按钮）
+                if app._bg_item is not None:
+                    first = app.collapsed.find_all()[0]
+                    check("壁纸:界面1背景图置底", first == app._bg_item,
+                          "first=%s bg=%s" % (first, app._bg_item))
+                    cx, cy = app.collapsed.coords(app._bg_item)
+                    w, h = app.collapsed.winfo_width(), app.collapsed.winfo_height()
+                    check("壁纸:界面1背景图居中",
+                          abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
+                          "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
+                    # cover 自适应：缩放后图片不小于画布（不露底）
+                    p1 = app._bg_surf_collapsed.get("photo")
+                    check("壁纸:背景图cover填充画布",
+                          p1 is not None and p1.width() >= w and p1.height() >= h,
+                          "photo=%s canvas=%s" % ((p1.width(), p1.height()) if p1 else None, (w, h)))
+                else:
+                    check("壁纸:界面1背景图置底", False, "bg item 未创建")
+                # 界面2：展开后内层画布也有背景图且置底
+                app.set_expanded(True)
+                app.root.update()
+                it2 = app._bg_surf_expand.get("item")
+                if it2 is not None:
+                    first2 = app.canvas.find_all()[0]
+                    check("壁纸:界面2背景图存在且置底", first2 == it2,
+                          "first=%s bg=%s" % (first2, it2))
+                else:
+                    check("壁纸:界面2背景图存在且置底", False, "expand bg 未创建")
+                app.set_expanded(False)
+                app.root.update()
+                # 搜索面板：打开后结果区也有背景图且置底
+                app._toggle_panel("search")
+                app.root.update()
+                time.sleep(0.15)
+                app.root.update()
+                it3 = app._bg_surf_search.get("item")
+                if it3 is not None:
+                    first3 = app._search_canvas.find_all()[0]
+                    check("壁纸:搜索面板背景图存在且置底", first3 == it3,
+                          "first=%s bg=%s" % (first3, it3))
+                else:
+                    check("壁纸:搜索面板背景图存在且置底", False, "search bg 未创建")
+                app._toggle_panel("search")
+                app.root.update()
+                # 自适应：改变窗口大小 → 背景图随画布重新居中且重新降采样
+                app.root.geometry("380x220")
+                app.root.update()
+                time.sleep(0.1)
+                app.root.update()
+                cx, cy = app.collapsed.coords(app._bg_item)
+                w, h = app.collapsed.winfo_width(), app.collapsed.winfo_height()
+                check("壁纸:窗口缩放后背景图随动",
+                      abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
+                      "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
+                p2 = app._bg_surf_collapsed.get("photo")
+                check("壁纸:缩放后重新降采样",
+                      p2 is not None and app._bg_surf_collapsed.get("factor", 1) >= 2,
+                      "factor=%s photo=%s" % (app._bg_surf_collapsed.get("factor"),
+                                              (p2.width(), p2.height()) if p2 else None))
+                # 移除后各面板清空
+                app._remove_bg_image()
+                app.root.update()
+                check("壁纸:移除后各面板清空",
+                      app._bg_display is None
+                      and app._bg_surf_expand.get("item") is None
+                      and app._bg_surf_search.get("item") is None, "")
+
             # ---- 4. 功能按钮（齿轮/图片/扳手，靠右）面板跟随 ----
             app._sync_panels()
             app.root.update()

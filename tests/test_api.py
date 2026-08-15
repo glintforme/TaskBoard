@@ -3,6 +3,7 @@
 
 用法: python test_api.py   （退出码 0=全部通过）
 """
+import base64
 import json
 import os
 import shutil
@@ -71,6 +72,12 @@ def expect_http_error(base, path, method="GET", body=None):
         return e.code
 
 
+def http_bin(base, path):
+    """原始字节请求（图片等二进制资源）。"""
+    with urllib.request.urlopen(base + path, timeout=15) as resp:
+        return resp.status, resp.read(), resp.headers.get("Content-Type")
+
+
 def main():
     global PASS, FAIL
     tmp = os.path.join(BASE_DIR, ".test_tmp")
@@ -98,6 +105,38 @@ def main():
     check("GET /app.js", s == 200 and "悬浮任务板" in str(js), str(s))
     code = expect_http_error(base, "/api/not-exist")
     check("未知接口返回 404", code == 404, str(code))
+
+    # ---------- 背景图片接口 ----------
+    print("\n== 背景图片接口 ==")
+    PNG_1PX = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+    cfg_file = os.path.join(tmp, "config.json")
+    bg_png = os.path.join(tmp, "bg.png")
+    with open(bg_png, "wb") as f:
+        f.write(PNG_1PX)
+    with open(cfg_file, "w", encoding="utf-8") as f:
+        json.dump({"bg_image": bg_png, "bg_opacity": 0.66}, f, ensure_ascii=False)
+    st, body, ctype = http_bin(base, "/api/bg")
+    check("GET /api/bg 返回背景图片", st == 200 and body == PNG_1PX and ctype == "image/png",
+          "status=%s type=%s" % (st, ctype))
+    s, r = http(base, "/api/config")
+    check("配置含背景图信息",
+          s == 200 and r["config"].get("bg_image") == bg_png
+          and abs(r["config"].get("bg_opacity", 0) - 0.66) < 0.001, str(r))
+    bg_jpg = os.path.join(tmp, "bg.jpg")
+    with open(bg_jpg, "wb") as f:
+        f.write(PNG_1PX)
+    with open(cfg_file, "w", encoding="utf-8") as f:
+        json.dump({"bg_image": bg_jpg}, f, ensure_ascii=False)
+    st, body, ctype = http_bin(base, "/api/bg")
+    check("GET /api/bg jpg 扩展名类型", st == 200 and ctype == "image/jpeg",
+          "status=%s type=%s" % (st, ctype))
+    with open(cfg_file, "w", encoding="utf-8") as f:
+        json.dump({}, f, ensure_ascii=False)
+    code = expect_http_error(base, "/api/bg")
+    check("未设置背景图返回 404", code == 404, str(code))
+    with open(cfg_file, "w", encoding="utf-8") as f:
+        json.dump({"db_path": db_path}, f, ensure_ascii=False)
 
     # ---------- 任务 CRUD ----------
     print("\n== 任务增删改查 ==")

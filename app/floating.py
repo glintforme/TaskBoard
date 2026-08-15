@@ -2,6 +2,8 @@
 """桌面悬浮窗（tkinter）：
 - 折叠态：显示 日常/周常/月常 任务数与 今日完成/总完成 统计，并显示今日待完成任务标题；每 5 秒自动刷新；
 - 透明化：整窗透明度可调（默认 72%，可透见桌面）；可导入自定义背景图片（PNG/GIF/JPG，自带透明度，默认透至桌面可见）；
+  背景图作为壁纸**自适应窗口大小**（cover 缩放 + 居中，随窗口缩放跟随），始终**置底不遮挡内容**；
+  显示于 界面1（折叠态）/ 界面2（展开态）/ 搜索面板，后台设置页同样显示该背景图；
 - 左键单击：展开/收起任务明细（每条带「完成」按钮）；点击任务标题展开完整内容；
 - 拖动：按住窗口任意位置（非按钮区域）可随意拖动；边缘 6px 内可拖拽缩放（手动调整的尺寸不会被自动适配回弹）；
   拖到屏幕右缘附近自动吸附隐藏到侧边，点击隐藏位置即可恢复原位；
@@ -206,6 +208,8 @@ class FloatingApp:
         self.bg_opacity = float(cfg.get("bg_opacity", 0.70))
         self._bg_display = None
         self._bg_item = None
+        self._bg_master = None
+        self._bg_surfaces = []
         self._btn_min_win = None
 
         self.root = tk.Tk()
@@ -290,6 +294,9 @@ class FloatingApp:
         self._t_pending = self.collapsed.create_text(10, 72, anchor="nw", text="", fill=FG_DIM,
                                                      font=_font(8))
         self.collapsed.bind("<Configure>", self._on_collapsed_configure)
+        self._bg_surf_collapsed = {"canvas": self.collapsed, "item": None,
+                                   "photo": None, "factor": None}
+        self._bg_surfaces.append(self._bg_surf_collapsed)
 
         # ------- 展开面板 -------
         self.expand_frame = tk.Frame(self.body, bg=BG, highlightthickness=1,
@@ -337,6 +344,9 @@ class FloatingApp:
         self._list_win = self.canvas.create_window((0, 0), window=self.list_frame, anchor="nw")
         self.list_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self._bg_surf_expand = {"canvas": self.canvas, "item": None,
+                                "photo": None, "factor": None}
+        self._bg_surfaces.append(self._bg_surf_expand)
 
         self.expand_frame.pack_forget()
 
@@ -344,8 +354,8 @@ class FloatingApp:
         try:
             w = e.width or self.collapsed.winfo_width()
             h = e.height or self.collapsed.winfo_height()
-            if self._bg_item is not None:
-                self.collapsed.coords(self._bg_item, w / 2, h / 2)
+            if self._bg_surf_collapsed is not None:
+                self._bg_paint(self._bg_surf_collapsed)
             if self._btn_min_win is not None:
                 self.collapsed.coords(self._btn_min_win, w - 36, 10)
             if self._btn_refresh_win is not None:
@@ -395,14 +405,77 @@ class FloatingApp:
         cfg["window_opacity"] = self.window_opacity
         save_config(cfg)
 
-    # ---------------- 背景图片 ----------------
-    def _load_bg_image(self):
-        if self._bg_item is not None:
+    # ---------------- 背景图片（统一壁纸引擎） ----------------
+    def _bg_paint(self, surf):
+        """把背景图按画布大小自适应绘制到 surf（canvas），始终置底、居中、cover 裁切。
+        尺寸变化只换整数降采样因子，避免频繁重建。"""
+        canvas = surf.get("canvas")
+        if canvas is None or self._bg_master is None:
+            return
+        try:
+            w = canvas.winfo_width()
+            h = canvas.winfo_height()
+        except Exception:
+            return
+        if w < 10 or h < 10:
+            return
+        mw, mh = self._bg_master.width(), self._bg_master.height()
+        if mw < 1 or mh < 1:
+            return
+        k = 1
+        if mw > w or mh > h:
+            k = max(1, min(mw // w, mh // h))
+        if surf.get("factor") != k:
+            surf["photo"] = self._bg_master.subsample(k, k) if k > 1 else self._bg_master
+            surf["factor"] = k
+            if surf.get("item") is not None:
+                try:
+                    canvas.itemconfigure(surf["item"], image=surf["photo"])
+                except tk.TclError:
+                    surf["item"] = None
+                    surf["factor"] = None
+        try:
+            if surf.get("item") is None:
+                surf["item"] = canvas.create_image(w / 2, h / 2, anchor="center",
+                                                   image=surf["photo"], tags=("__bg__",))
+            else:
+                canvas.coords(surf["item"], w / 2, h / 2)
+        except tk.TclError:
+            # 画布被整体重建（如渲染清空全部项）→ 重新创建
+            surf["item"] = None
+            surf["factor"] = None
+            self._bg_paint(surf)
+            return
+        try:
+            canvas.tag_lower(surf["item"])
+        except Exception:
+            pass
+
+    def _bg_paint_all(self):
+        for s in self._bg_surfaces:
             try:
-                self.collapsed.delete(self._bg_item)
+                self._bg_paint(s)
             except Exception:
                 pass
-            self._bg_item = None
+        # 兼容旧接口：_bg_item 指向折叠态画布上的背景项
+        if self._bg_surf_collapsed is not None:
+            self._bg_item = self._bg_surf_collapsed.get("item")
+
+    def _bg_clear_all(self):
+        for s in self._bg_surfaces:
+            if s.get("item") is not None:
+                try:
+                    s["canvas"].delete(s["item"])
+                except Exception:
+                    pass
+            s["item"] = None
+            s["photo"] = None
+            s["factor"] = None
+        self._bg_item = None
+
+    def _load_bg_image(self):
+        self._bg_clear_all()
+        self._bg_master = None
         self._bg_display = None
         path = self.bg_image_path
         if not path or not os.path.isfile(path):
@@ -419,9 +492,9 @@ class FloatingApp:
                 if k > 1:
                     photo = photo.subsample(k, k)
             _apply_image_opacity(photo, max(0.0, min(1.0, self.bg_opacity)))
+            self._bg_master = photo
             self._bg_display = photo
-            self._bg_item = self.collapsed.create_image(0, 0, anchor="center",
-                                                        image=self._bg_display)
+            self._bg_paint_all()
             self._on_collapsed_configure(type("E", (), {"width": 0, "height": 0})())
         except Exception as e:
             self.bg_image_path = ""
@@ -641,13 +714,17 @@ class FloatingApp:
         self._search_canvas.configure(yscrollcommand=self._search_sbar.set)
         self._search_canvas.pack(side="left", fill="both", expand=True)
         self._search_sbar.pack(side="right", fill="y")
+        self._bg_surf_search = {"canvas": self._search_canvas, "item": None,
+                                "photo": None, "factor": None}
+        self._bg_surfaces.append(self._bg_surf_search)
         self._search_result = tk.Frame(self._search_canvas, bg=BG)
         self._search_result_win = self._search_canvas.create_window(
             (0, 0), window=self._search_result, anchor="nw")
         self._search_result.bind("<Configure>",
                                  lambda e: self._search_canvas.configure(scrollregion=self._search_canvas.bbox("all")))
         self._search_canvas.bind("<Configure>",
-                                 lambda e: self._search_canvas.itemconfigure(self._search_result_win, width=e.width))
+                                 lambda e: (self._search_canvas.itemconfigure(self._search_result_win, width=e.width),
+                                            self._bg_paint(self._bg_surf_search)))
         self._search_canvas.bind("<MouseWheel>", self._on_search_wheel)
 
         # 分页
@@ -938,6 +1015,8 @@ class FloatingApp:
                 ow = self._search_user_w or self.search_panel.winfo_width() \
                     or self.search_panel.winfo_reqwidth()
                 self.search_panel.geometry("+%d+%d" % (max(0, x - ow - 6), y))
+                if self._bg_surf_search is not None:
+                    self._bg_paint(self._bg_surf_search)
             else:
                 self.search_panel.withdraw()
         except Exception:
@@ -1603,6 +1682,7 @@ class FloatingApp:
             self._render_collapsed()
         self.root.update_idletasks()
         self._sync_panels()
+        self._bg_paint_all()
 
     def _wrap_width(self):
         """基础内容可换行宽度：画布宽 - 滚动条 - 行内边距 - 完成按钮。"""
@@ -1615,6 +1695,8 @@ class FloatingApp:
 
     def _on_canvas_configure(self, e):
         self.canvas.itemconfigure(self._list_win, width=e.width)
+        if self._bg_surf_expand is not None:
+            self._bg_paint(self._bg_surf_expand)
         if not self.expanded:
             return
         if abs(e.width - self._last_canvas_w) < 4:

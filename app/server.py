@@ -202,6 +202,8 @@ class ApiServer:
                     return self._ok(reminders=app.db.due_reminders())
                 if path == "/api/autostart":
                     return self._ok(enabled=autostart.is_enabled())
+                if path == "/api/bg":
+                    return self._serve_bg()
                 m = re.fullmatch(r"/api/tasks/(\d+)", path)
                 if m:
                     t = app.db.get_task(int(m.group(1)))
@@ -361,6 +363,13 @@ class ApiServer:
                                 restart_required=restart, config=self._public_config())
 
             def _public_config(self):
+                # 背景图/透明度从当前配置文件读取（悬浮窗运行时写入，启动时可能已变化）
+                cur = {}
+                try:
+                    with open(app.config_path, "r", encoding="utf-8") as f:
+                        cur = json.load(f)
+                except Exception:
+                    pass
                 return {
                     "host": app.config.get("host", "0.0.0.0"),
                     "port": app.port,
@@ -368,7 +377,30 @@ class ApiServer:
                     "autostart": autostart.is_enabled(),
                     "lan_ips": get_lan_ips(),
                     "today": today_str(),
+                    "bg_image": cur.get("bg_image") or "",
+                    "bg_opacity": float(cur.get("bg_opacity", 0.7)),
                 }
+
+            def _serve_bg(self):
+                """后台设置页背景图片：按配置读取当前文件，返回图片字节。"""
+                cur = {}
+                try:
+                    with open(app.config_path, "r", encoding="utf-8") as f:
+                        cur = json.load(f)
+                except Exception:
+                    pass
+                p = cur.get("bg_image") or ""
+                ext = os.path.splitext(p)[1].lower()
+                mime = {".png": "image/png", ".gif": "image/gif", ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg", ".jfif": "image/jpeg", ".webp": "image/webp"}
+                if p and os.path.isfile(p) and ext in mime:
+                    try:
+                        with open(p, "rb") as f:
+                            data = f.read()
+                        return self._send(200, data, mime[ext])
+                    except OSError:
+                        pass
+                return self._err("未设置背景图片", 404)
 
             def _save_config(self):
                 """保存配置：与当前文件合并，避免用启动时的旧配置覆盖悬浮窗已保存的位置等。"""

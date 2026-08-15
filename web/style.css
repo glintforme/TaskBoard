@@ -15,6 +15,19 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { -webkit-text-size-adjust: 100%; }
+
+/* ---------- 背景图片（后台设置页壁纸，来自 /api/bg） ---------- */
+#bgimg {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-position: center; background-size: cover; background-repeat: no-repeat;
+  display: none;
+}
+#bgimg.on { display: block; }
+#bgimg::after {
+  content: ""; position: absolute; inset: 0;
+  background: rgba(22, 26, 34, var(--bgdim, 0.35));
+}
+main, footer { position: relative; z-index: 1; }
 body {
   background: var(--bg);
   color: var(--fg);
