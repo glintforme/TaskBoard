@@ -707,19 +707,11 @@ class FloatingApp:
                 cv.itemconfigure(rid, state="hidden")
                 cv.itemconfigure(tid, fill=FG)
 
-        # 状态文本（画布，独立于结果区，永不销毁）
+        # 状态/结果文本（画布，直接显示在任务区域内，无独立黑框：
+        # 搜索中/未找到时显示提示，任务渲染后由任务行替换）
         self._search_status = cv.create_text(10, 0, anchor="nw", text="输入关键词搜索全部任务",
                                              fill=FG_DIM, font=_font(8), tags=("sch",))
-
-        # 结果区：滚动画布（纯深色底，不含背景图——背景图只保留最外层整面板一张）
-        self._search_canvas = tk.Canvas(cv, bg=BG, highlightthickness=0, width=10, height=10)
-        self._search_sbar = tk.Scrollbar(cv, orient="vertical", command=self._search_canvas.yview)
-        self._search_canvas.configure(yscrollcommand=self._search_sbar.set)
-        self._search_canvas.bind("<MouseWheel>", self._on_search_wheel)
-        self._search_canvas_win = cv.create_window(0, 0, anchor="nw", window=self._search_canvas,
-                                                   tags=("sch",))
-        self._search_sbar_win = cv.create_window(0, 0, anchor="nw", window=self._search_sbar,
-                                                 tags=("sch",))
+        self._search_rows_start = 0   # 结果区首行 y（由布局计算）
 
         # 分页：上一页/下一页为真实按钮（可点击），页标签为画布文本
         self._search_prev = tk.Button(cv, text="◀ 上一页", command=lambda: self._search_page_to(-1),
@@ -734,17 +726,17 @@ class FloatingApp:
                                       cursor="hand2")
         self._search_next_win = cv.create_window(0, 0, anchor="nw", window=self._search_next,
                                                  tags=("sch",))
-        self._search_state = {"page": 1, "pages": 1, "total": 0}
+        self._search_state = {"page": 1, "pages": 1, "total": 0, "page_size": 8}
         self._search_req_id = 0      # 请求序号：丢弃过期响应（快速切换分类/搜索时防串扰）
         self._search_after = None    # 即时搜索防抖
+        self._search_resize_after = None  # 面板缩放防抖（重新按窗口大小分页）
         self._panel_resize = None    # 面板自身边框缩放状态
         self._search_user_w = None   # 用户手动调整过的面板宽度（保持）
         # 冻结面板尺寸：尺寸完全由 wm geometry 控制（边框缩放可靠生效），初始取自然尺寸
         p.pack_propagate(False)
         cv.bind("<Configure>", self._on_search_cv_configure)
         # 面板自身边框缩放（与悬浮窗互不影响）：所有控件按下都用根坐标判定边缘
-        for w2 in (p, cv, self._search_canvas, self._search_sbar, self._search_input,
-                   self._search_prev, self._search_next):
+        for w2 in (p, cv, self._search_input, self._search_prev, self._search_next):
             w2.bind("<ButtonPress-1>", self._panel_press)
             w2.bind("<B1-Motion>", self._panel_motion)
             w2.bind("<ButtonRelease-1>", self._panel_release)
@@ -758,8 +750,13 @@ class FloatingApp:
         self._panel_open["search"] = False
         self._sync_panels()
 
+    def _search_page_size(self, h):
+        """按面板高度计算每页任务数（窗口越大一页显示越多，HTML 式分页）。"""
+        results_h = max(50, h - 110 - 34)
+        return max(2, (results_h - 22) // 18)
+
     def _on_search_cv_configure(self, e):
-        """搜索面板布局：各元素随面板尺寸自适应摆放（面板无背景图）。"""
+        """搜索面板布局：各元素随面板尺寸自适应摆放（面板无背景图、无黑框）。"""
         try:
             cv = self._search_cv
             w = e.width or cv.winfo_width()
@@ -784,21 +781,26 @@ class FloatingApp:
                 y0 = 56 + row * 22
                 cv.coords(rid, x0 + 2, y0, x0 + cw4 - 2, y0 + 18)
                 cv.coords(tid, x0 + cw4 / 2, y0 + 9)
-            # 状态文本
-            cv.coords(self._search_status, 10, 104)
-            # 结果区：状态下方到分页上方
+            # 状态/结果区：状态文本在任务区顶部，任务行紧随其后
             top_y = 108
-            pager_h = 32
-            rw = max(60, w - 16)
-            rh = max(40, h - top_y - pager_h - 6)
-            cv.coords(self._search_canvas_win, 8, top_y)
-            cv.itemconfigure(self._search_canvas_win, width=rw - 12, height=rh)
-            cv.coords(self._search_sbar_win, 8 + rw - 12, top_y)
-            cv.itemconfigure(self._search_sbar_win, height=rh)
+            cv.coords(self._search_status, 10, top_y)
+            self._search_rows_start = top_y + 18
             # 分页
             cv.coords(self._search_prev_win, 8, h - 26)
             cv.coords(self._search_page_lbl, w / 2, h - 16)
             cv.coords(self._search_next_win, w - 8, h - 26)
+            # 窗口大小变化 → 每页数量随之调整并重新取当前页（防抖）
+            ps = self._search_page_size(h)
+            if ps != self._search_state.get("page_size"):
+                self._search_state["page_size"] = ps
+                if self._search_resize_after is not None:
+                    try:
+                        self.root.after_cancel(self._search_resize_after)
+                    except Exception:
+                        pass
+                self._search_resize_after = self.root.after(
+                    250, lambda: self._search_fetch(
+                        self._search_input.get().strip(), self._search_state.get("page", 1)))
         except Exception:
             pass
 
@@ -851,12 +853,6 @@ class FloatingApp:
         self._panel_resize = None
         self._sync_panels()  # 重新贴靠悬浮窗左侧
 
-    def _on_search_wheel(self, e):
-        try:
-            self._search_canvas.yview_scroll(int(-e.delta / 120), "units")
-        except Exception:
-            pass
-
     def _on_search_key(self, e):
         """输入框即时搜索（防抖 300ms）。"""
         if self._search_after is not None:
@@ -892,13 +888,15 @@ class FloatingApp:
     def _search_fetch(self, q, page):
         self._search_req_id += 1
         req_id = self._search_req_id
+        # 状态输出显示在任务区域内（任务渲染后由任务行替换；无结果时保持显示）
         self._search_cv.itemconfigure(self._search_status, text="搜索中…", fill=FG_DIM)
+        ps = self._search_state.get("page_size", 8)
         import urllib.parse as up
 
         def work():
             try:
-                url = ("%s/api/tasks/search?q=%s&scope=%s&page=%d&page_size=10"
-                       % (self.base, up.quote(q or ""), up.quote(self._search_cat or ""), page))
+                url = ("%s/api/tasks/search?q=%s&scope=%s&page=%d&page_size=%d"
+                       % (self.base, up.quote(q or ""), up.quote(self._search_cat or ""), page, ps))
                 r = http_json(url, timeout=8)
                 self.q.put(("search", req_id, r))
             except Exception as e:
@@ -908,46 +906,41 @@ class FloatingApp:
 
     def _search_render(self, r):
         try:
+            cv = self._search_cv
             if r.get("error"):
-                self._search_cv.itemconfigure(self._search_status,
-                                              text="搜索失败：" + r["error"], fill=RED)
+                cv.itemconfigure(self._search_status, text="搜索失败：" + r["error"], fill=RED)
                 return
-            for i in list(self._search_canvas.find_withtag("srow")):
-                self._search_canvas.delete(i)
+            for i in list(cv.find_withtag("srow")):
+                cv.delete(i)
             tasks = r.get("tasks") or []
             self._search_state.update({"page": r.get("page", 1), "pages": r.get("pages", 1),
-                                       "total": r.get("total", 0)})
+                                       "total": r.get("total", 0),
+                                       "page_size": int(r.get("page_size") or
+                                                        self._search_state.get("page_size", 8))})
             if not tasks:
-                self._search_cv.itemconfigure(self._search_status, text="未找到匹配任务", fill=FG_DIM)
+                # 分类/搜索无结果显示时状态常驻任务区
+                cv.itemconfigure(self._search_status, text="未找到匹配任务", fill=FG_DIM)
             else:
-                self._search_cv.itemconfigure(self._search_status, text="", fill=FG_DIM)
-                y = 2
+                cv.itemconfigure(self._search_status, text="", fill=FG_DIM)
+                y = self._search_rows_start or 126
                 for t in tasks:
                     done = bool(t.get("done_count"))
                     title = t["title"]
                     if len(title) > 14:
                         title = title[:13] + "…"
                     txt = ("✓ " if done else "○ ") + title
-                    self._search_canvas.create_text(8, y, anchor="nw", text=txt,
-                                                    fill=DONE if done else FG, font=_font(8),
-                                                    tags=("srow",))
+                    cv.create_text(10, y, anchor="nw", text=txt,
+                                   fill=DONE if done else FG, font=_font(8),
+                                   tags=("srow",))
                     if done and t.get("last_completed_at"):
                         ct = str(t["last_completed_at"])[:16].replace("T", " ")
-                        self._search_canvas.create_text(0, y, anchor="ne", text=ct,
-                                                        fill=FG_DIM, font=_font(7), tags=("srow",))
+                        cv.create_text(0, y, anchor="ne", text=ct,
+                                       fill=FG_DIM, font=_font(7), tags=("srow",))
                     y += 18
-            try:
-                self._search_canvas.configure(scrollregion=self._search_canvas.bbox("srow"))
-            except Exception:
-                pass
-            self._search_cv.itemconfigure(self._search_page_lbl, text="第 %d/%d 页 · 共 %d 条" % (
+            cv.itemconfigure(self._search_page_lbl, text="第 %d/%d 页 · 共 %d 条" % (
                 self._search_state["page"], self._search_state["pages"], self._search_state["total"]))
             self._search_prev.configure(state="normal" if self._search_state["page"] > 1 else "disabled")
             self._search_next.configure(state="normal" if self._search_state["page"] < self._search_state["pages"] else "disabled")
-            try:
-                self._search_canvas.yview_moveto(0)  # 翻页/搜索后回到顶部
-            except Exception:
-                pass
             self.search_panel.update_idletasks()
         except Exception:
             pass
@@ -1242,17 +1235,6 @@ class FloatingApp:
         if self._is_main_widget(w) and self.expanded:
             self.canvas.yview_scroll(int(-e.delta / 120), "units")
             return
-        # 鼠标位于搜索面板内 → 滚动搜索结果
-        if w is not None:
-            node = w
-            while node is not None and node is not self.root:
-                if node is self.search_panel:
-                    try:
-                        self._search_canvas.yview_scroll(int(-e.delta / 120), "units")
-                    except Exception:
-                        pass
-                    return
-                node = getattr(node, "master", None)
 
     # ---------------- 系统托盘（最小化） ----------------
     def _ensure_tray(self):

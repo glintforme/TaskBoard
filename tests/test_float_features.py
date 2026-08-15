@@ -159,8 +159,8 @@ def collect_texts(widget):
 
 
 def search_row_texts(app):
-    """收集搜索面板结果区画布上的行文本。"""
-    return [app._search_canvas.itemcget(i, "text") for i in app._search_canvas.find_withtag("srow")]
+    """收集搜索面板结果区画布上的行文本（直接绘制在面板画布上，无黑框）。"""
+    return [app._search_cv.itemcget(i, "text") for i in app._search_cv.find_withtag("srow")]
 
 
 def search_page_text(app):
@@ -411,10 +411,8 @@ def main():
                 time.sleep(0.15)
                 app.root.update()
                 check("壁纸:搜索面板无背景图",
-                      len(app._search_cv.find_withtag("__bg__")) == 0
-                      and len(app._search_canvas.find_withtag("__bg__")) == 0,
-                      "cv_bg=%s canvas_bg=%s" % (app._search_cv.find_withtag("__bg__"),
-                                                 app._search_canvas.find_withtag("__bg__")))
+                      len(app._search_cv.find_withtag("__bg__")) == 0,
+                      "cv_bg=%s" % (app._search_cv.find_withtag("__bg__"),))
                 app._toggle_panel("search")
                 app.root.update()
                 # 自适应：改变窗口大小 → 背景图重新拉伸到恰好铺满新画布
@@ -864,7 +862,7 @@ def main():
             check("120行倒计时更新耗时<50ms", dt < 0.05, "%.1fms" % (dt * 1000))
 
             # ---- 12e. 放大镜搜索面板 ----
-            check("放大镜搜索按钮存在", hasattr(app, "_search_canvas") and hasattr(app, "search_panel"), "")
+            check("放大镜搜索按钮存在", hasattr(app, "_search_cv") and hasattr(app, "search_panel"), "")
             app._toggle_panel("search")  # 首次打开应自动加载全部任务
             app.root.update()
             for _ in range(30):  # 等自动加载完成
@@ -951,6 +949,30 @@ def main():
             check("搜索栏即时搜索生效（新请求已渲染、旧结果被替换）",
                   any("晨跑" in t for t in live_texts) and not any("周报" in t for t in live_texts),
                   str(live_texts))
+            # 状态输出显示在任务区域内：无结果时保持显示提示，任务渲染后提示被替换为空
+            req_nf = app._search_req_id + 1
+            app.q.put(("search", req_nf, {"tasks": [], "page": 1, "pages": 1, "total": 0,
+                                          "page_size": app._search_state.get("page_size", 8)}))
+            app._search_req_id = req_nf
+            app._poll_queue_once()
+            app.root.update()
+            check("无结果时任务区显示提示且常驻",
+                  app._search_cv.itemcget(app._search_status, "text") == "未找到匹配任务"
+                  and len(app._search_cv.find_withtag("srow")) == 0,
+                  app._search_cv.itemcget(app._search_status, "text"))
+            req_ok = app._search_req_id + 1
+            app.q.put(("search", req_ok, {"tasks": [{"id": 9601, "title": "替换提示的任务",
+                                                     "scope": "today", "done_count": 0,
+                                                     "last_completed_at": None}],
+                                          "page": 1, "pages": 1, "total": 1,
+                                          "page_size": app._search_state.get("page_size", 8)}))
+            app._search_req_id = req_ok
+            app._poll_queue_once()
+            app.root.update()
+            check("任务渲染后提示被任务行替换",
+                  app._search_cv.itemcget(app._search_status, "text") == ""
+                  and any("替换提示的任务" in t for t in search_row_texts(app)),
+                  app._search_cv.itemcget(app._search_status, "text"))
 
             # ---- 12f. 面板与悬浮窗独立：拖动面板不改悬浮窗；面板边框独立缩放；X 关闭 ----
             if not app._panel_open.get("search"):
@@ -1033,19 +1055,19 @@ def main():
             tasks12 = [{"id": 9500 + i, "title": "分页任务 %03d" % i, "scope": "today",
                         "done_count": 0, "last_completed_at": None} for i in range(12)]
             app.q.put(("search", app._search_req_id,
-                       {"tasks": tasks12, "page": 1, "pages": 2, "total": 12}))
+                       {"tasks": tasks12, "page": 1, "pages": 2, "total": 12,
+                        "page_size": app._search_state.get("page_size", 8)}))
             app._poll_queue_once()
             app.root.update()
             app.search_panel.update_idletasks()
-            rows12 = app._search_canvas.find_withtag("srow")
-            check("结果区渲染全部12行", len(rows12) == 12, str(len(rows12)))
-            frac = app._search_canvas.yview()
-            check("结果区可滚动(内容超出视口)", frac[0] == 0.0 and frac[1] < 1.0, str(frac))
-            app._search_canvas.yview_moveto(1.0)
-            app.root.update()
-            frac_bottom = app._search_canvas.yview()
-            check("滚动后可查看最后一行", frac_bottom[1] >= 0.99, str(frac_bottom))
-            # 翻页：下一页 → 新结果且滚动回到顶部
+            # 按窗口大小分页：任务数超出每页容量 → 分页显示（无滚动黑框，结果直接绘制在面板上）
+            ps = app._search_state.get("page_size", 8)
+            rows12 = app._search_cv.find_withtag("srow")
+            check("结果区按窗口大小分页显示", len(rows12) == ps and app._search_state["pages"] >= 2,
+                  "rows=%d page_size=%d pages=%s" % (len(rows12), ps, app._search_state["pages"]))
+            check("无滚动黑框(结果直接绘制在面板画布)",
+                  not hasattr(app, "_search_canvas"), "")
+            # 翻页：下一页 → 新一页任务替换上一页
             app._search_next.invoke()
             for _ in range(20):
                 app.root.update()
@@ -1055,8 +1077,8 @@ def main():
             app.root.update()
             check("翻页到第2页", app._search_state["page"] == 2, str(app._search_state["page"]))
             app.search_panel.update_idletasks()
-            frac2 = app._search_canvas.yview()
-            check("翻页后滚动回到顶部", frac2[0] == 0.0, str(frac2))
+            rows2 = app._search_cv.find_withtag("srow")
+            check("第2页显示剩余任务", len(rows2) == 12 - ps, "rows=%d expect=%d" % (len(rows2), 12 - ps))
             app._toggle_panel("search")
             app.root.update()
             app._toggle_panel("search")
