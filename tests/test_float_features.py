@@ -976,6 +976,14 @@ def main():
                   app._panel_open["search"] and app.search_panel.state() != "withdrawn", "")
             check("打开自动加载全部任务", app._search_state["total"] > 0,
                   str(app._search_state["total"]))
+            # 首次打开即按窗口容量分页（每页 8 条，而不是误算成 2）
+            check("首次打开即按窗口容量分页(每页8条)",
+                  app._search_state.get("page_size") == 8,
+                  str(app._search_state.get("page_size")))
+            check("首次打开即显示窗口可容纳任务数",
+                  len(app._search_cv.find_withtag("srow")) == min(8, app._search_state.get("total", 0)),
+                  "rows=%d total=%s" % (len(app._search_cv.find_withtag("srow")),
+                                        app._search_state.get("total")))
             # 分类初始即醒目可见（默认选中「全部」白字，其余浅色，非黑色）
             cat_fills = {v: str(app._search_cv.itemcget(tid, "fill")) for v, (rid, tid) in app._cat_items.items()}
             check("分类初始醒目可见(非黑色)",

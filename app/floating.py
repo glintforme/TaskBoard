@@ -773,7 +773,10 @@ class FloatingApp:
 
     def _search_page_size(self, h):
         """每页任务数：固定上限 8 条（类似网页"每页 N 条"），
-        且不超过结果区实际能放下的行数（行高 18px，结果区从 y=126 到分页条 y=h-26）。"""
+        且不超过结果区实际能放下的行数（行高 18px，结果区从 y=126 到分页条 y=h-26）。
+        面板尚未布局（h 极小）时按 8 条处理。"""
+        if h < 100:
+            return 8
         max_fit = max(2, (h - 126 - 26 - 4) // 18)
         return min(8, max_fit)
 
@@ -912,7 +915,8 @@ class FloatingApp:
         req_id = self._search_req_id
         # 状态输出显示在任务区域内（任务渲染后由任务行替换；无结果时保持显示）
         self._search_cv.itemconfigure(self._search_status, text="搜索中…", fill=FG_DIM)
-        ps = self._search_state.get("page_size", 8)
+        # 每页条数按当前面板实际高度实时计算（不依赖可能过期的缓存值）
+        ps = self._search_page_size(self._search_cv.winfo_height())
         import urllib.parse as up
 
         def work():
@@ -1038,9 +1042,10 @@ class FloatingApp:
             self._panel_open[name] = True
         self._sync_panels()
         if name == "search" and not was_open:
-            # 首次打开自动加载全部任务
+            # 首次打开自动加载全部任务：延迟到面板完成布局（画布取得真实高度），
+            # 保证每页条数按窗口容量计算（否则会用未布局时的过小高度误算）
             if self._search_state["total"] == 0 and not self._search_input.get().strip():
-                self._search_go()
+                self.root.after(150, self._search_go)
 
     def _restore_position(self):
         """还原到原来位置：贴边隐藏时还原；否则回到最近一次正常位置。"""
