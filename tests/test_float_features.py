@@ -647,6 +647,45 @@ def main():
             check("还原到原来位置", (app.root.winfo_x(), app.root.winfo_y()) == (sw - 293, 80),
                   "%s vs %s" % ((app.root.winfo_x(), app.root.winfo_y()), (sw - 293, 80)))
 
+            # ---- 8b. 拖拽自由移动：贴边时不误触吸附（只有向右拖到右缘才隐藏） ----
+            app._user_resized = False
+            # 把窗口放到默认右缘位置（右缘=屏宽）→ 点击/上下/左拖都不应吸附
+            x_edge = sw - 280
+            app.root.geometry("280x180+%d+120" % x_edge)
+            app.root.update()
+            wy0 = app.root.winfo_y()
+            # ① 点击抖动（仅 2px）不吸附
+            app._press = (x_edge, wy0, x_edge, wy0)
+            app._mode = "drag"
+            app._on_b1_motion(type("E", (), {"x_root": x_edge + 2, "y_root": wy0 + 1}))
+            app.root.update()
+            check("点击抖动(2px)不会吸附隐藏", not app.docked and app.root.winfo_x() == x_edge + 2,
+                  "docked=%s x=%s" % (app.docked, app.root.winfo_x()))
+            app._mode = None
+            # ② 垂直向下拖动（在右缘）不吸附，可自由移动
+            app.root.geometry("280x180+%d+120" % x_edge)
+            app.root.update()
+            app._press = (x_edge, 120, x_edge, 120)
+            app._mode = "drag"
+            app._on_b1_motion(type("E", (), {"x_root": x_edge, "y_root": 320}))
+            app.root.update()
+            check("右缘位置垂直拖动不吸附(可上下移动)",
+                  not app.docked and app.root.winfo_y() == 320,
+                  "docked=%s y=%s" % (app.docked, app.root.winfo_y()))
+            app._mode = None
+            # ③ 从右缘向左拖动（拖离）不吸附
+            app.root.geometry("280x180+%d+120" % x_edge)
+            app.root.update()
+            app._press = (x_edge, 120, x_edge, 120)
+            app._mode = "drag"
+            app._on_b1_motion(type("E", (), {"x_root": x_edge - 100, "y_root": 120}))
+            app.root.update()
+            check("向右缘外拖动(拖离)不吸附", not app.docked and app.root.winfo_x() == x_edge - 100,
+                  "docked=%s x=%s" % (app.docked, app.root.winfo_x()))
+            app._mode = None
+            # ④ 从中间向右拖到右缘 → 才吸附（已在 8 段验证，此处确认窗口未被 ②③ 误吸附）
+            check("拖离后仍为正常悬浮状态", not app.docked, "")
+
             # ---- 9. 折叠态截止倒计时 / 未完成数 / 详情时间 ----
             from datetime import datetime, timedelta
             now = datetime.now()

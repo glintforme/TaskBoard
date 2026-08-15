@@ -1198,14 +1198,18 @@ class FloatingApp:
             nx = wx + e.x_root - x0
             ny = wy + e.y_root - y0
             self.root.geometry("+%d+%d" % (nx, ny))
-            # 拖拽靠近系统桌面右缘 → 自动吸附隐藏到侧边
-            sw = self.root.winfo_screenwidth()
-            w = self.root.winfo_width() or 240
-            if sw - (nx + w) < 14:
-                self.root.update_idletasks()  # 确保 winfo 反映最新位置（吸附前保存原位）
-                self._mode = None
-                self._dock(auto=True)
-                self._save_pos()
+            # 仅当用户把窗口【向右拖到桌面右缘附近】才自动吸附隐藏：
+            # 必须同时满足——指针确实移动过、窗口向右移动、右缘进入贴边区。
+            # 否则（点击抖动、上下左右随便拖、从右缘拖离）都不会触发隐藏。
+            moved = abs(e.x_root - x0) + abs(e.y_root - y0) >= 8
+            if moved and nx > wx:
+                sw = self.root.winfo_screenwidth()
+                w = self.root.winfo_width() or 240
+                if sw - (nx + w) < 14:
+                    self.root.update_idletasks()  # 确保 winfo 反映最新位置（吸附前保存原位）
+                    self._mode = None
+                    self._dock(auto=True)
+                    self._save_pos()
 
     def _on_release(self, e):
         if self._mode == "drag":
