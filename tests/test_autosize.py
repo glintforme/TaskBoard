@@ -13,10 +13,12 @@ import time
 import zlib
 from ctypes import wintypes
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(os.path.abspath(__file__))               # tests/
 OUT = os.path.join(BASE, ".test_tmp")
 os.makedirs(OUT, exist_ok=True)
-sys.path.insert(0, BASE)
+APP_DIR = os.path.join(os.path.dirname(BASE), "app")             # 应用代码目录
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
 
 from db import DB
 from floating import FloatingApp, SECTION_TITLES

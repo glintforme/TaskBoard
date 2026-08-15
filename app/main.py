@@ -14,9 +14,10 @@ import os
 import sys
 import time
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-DEFAULT_DB = os.path.join(BASE_DIR, "taskboard.db")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # app/
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                        # 项目根目录
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
+DEFAULT_DB = os.path.join(PROJECT_ROOT, "taskboard.db")
 DEFAULT_CONFIG = {"host": "0.0.0.0", "port": 39999, "db_path": DEFAULT_DB, "autostart": False}
 
 

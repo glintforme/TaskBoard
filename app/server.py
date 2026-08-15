@@ -15,7 +15,9 @@ import ai
 import autostart
 from db import DB, SCOPES, SCOPE_LABELS, month_range, today_str, week_range
 
-WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # app/
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                        # 项目根目录
+WEB_DIR = os.path.join(PROJECT_ROOT, "web")
 
 
 def get_lan_ips():
@@ -46,8 +48,7 @@ class ApiServer:
         self.log = log or (lambda *a: None)
         self.httpd = None
         self.thread = None
-        self.config_path = config.get("_config_path") or os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "config.json")
+        self.config_path = config.get("_config_path") or os.path.join(PROJECT_ROOT, "config.json")
 
     # ---------- 生命周期 ----------
     def start(self):

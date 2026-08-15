@@ -14,9 +14,10 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))           # tests/
+APP_DIR = os.path.join(os.path.dirname(BASE_DIR), "app")         # 应用代码目录
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
 
 os.environ["TASKBALL_AI_OFFLINE"] = "1"  # 测试强制走内置模板，避免真实 API 依赖网络
 

@@ -13,10 +13,13 @@ import sys
 import time
 import zlib
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(os.path.abspath(__file__))               # tests/
+ROOT = os.path.dirname(BASE)                                     # 项目根目录
 OUT = os.path.join(BASE, ".test_tmp")
 os.makedirs(OUT, exist_ok=True)
-sys.path.insert(0, BASE)
+APP_DIR = os.path.join(os.path.dirname(BASE), "app")             # 应用代码目录
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
 
 from db import DB
 from floating import FloatingApp, _apply_image_opacity, SECTION_TITLES
@@ -795,7 +798,7 @@ def main():
             app.root.update()
 
             # ---- 12c. × 关闭确认（最小化/退出 + 下次不提醒） ----
-            cfg_path = os.path.join(BASE, "config.json")
+            cfg_path = os.path.join(ROOT, "config.json")
             with open(cfg_path, "r", encoding="utf-8") as f:
                 orig_cfg2 = json.load(f)
             try:
@@ -873,7 +876,7 @@ def main():
                     json.dump(clean, f, ensure_ascii=False, indent=2)
 
             # ---- 12. 位置持久化：移动后保存，重启后恢复用户放置位置 ----
-            cfg_path = os.path.join(BASE, "config.json")
+            cfg_path = os.path.join(ROOT, "config.json")
             with open(cfg_path, "r", encoding="utf-8") as f:
                 orig_cfg = json.load(f)
             try:

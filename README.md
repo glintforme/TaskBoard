@@ -32,8 +32,8 @@
 **方式二**：命令行
 
 ```bat
-python main.py              :: 启动悬浮窗 + 后台服务（端口 39999）
-python main.py --no-gui     :: 只启动后台服务（无悬浮窗）
+python app\main.py              :: 启动悬浮窗 + 后台服务（端口 39999）
+python app\main.py --no-gui     :: 只启动后台服务（无悬浮窗）
 ```
 
 启动后屏幕出现悬浮窗。浏览器打开 **http://127.0.0.1:39999** 进入后台设置页面
@@ -137,11 +137,33 @@ setx GOOGLE_API_KEY "你的密钥"
 
 | 文件 | 说明 |
 | --- | --- |
+| `app/` | 应用源码（入口 `main.py` + 悬浮窗/服务/数据库/托盘/AI 等模块） |
+| `tests/` | 全部自测脚本与审计脚本 |
+| `web/` | 后台设置页面（HTML/CSS/JS，响应式适配手机） |
 | `taskboard.db` | SQLite 数据库（任务表、完成记录表、提醒记录表、设置表），路径可在设置页修改 |
 | `config.json` | 端口 / 监听地址 / 数据库路径 / 悬浮窗位置 / 游戏模式（本地生成，模板见 `config.example.json`） |
-| `web/` | 后台设置页面（HTML/CSS/JS，响应式适配手机） |
 | `start.bat` | 双击启动入口（纯 ASCII，规避中文系统批处理编码问题） |
 | `创建桌面快捷方式.bat` | 在桌面创建「悬浮任务板」快捷方式（无黑窗启动） |
+
+### 目录结构
+
+```
+TaskBoard/
+├── app/                 # 应用源码
+│   ├── main.py          # 入口：启动后台服务 + 悬浮窗
+│   ├── floating.py      # 桌面悬浮窗（界面1/界面2/面板/托盘交互）
+│   ├── server.py        # 本地 Web 服务 + API
+│   ├── db.py            # SQLite 数据层（迁移/完成记录/提醒）
+│   ├── ai.py            # AI 生成任务（DeepSeek/Kimi/Gemini）
+│   ├── tray.py          # 系统托盘
+│   └── autostart.py     # 开机自启动（注册表）
+├── tests/               # 自测与审计脚本
+├── web/                 # 后台设置页面（index.html / style.css / app.js）
+├── taskboard.db         # 本地数据库（运行时生成）
+├── config.json          # 本地配置（运行时生成）
+├── start.bat            # 双击启动
+└── 创建桌面快捷方式.bat  # 生成桌面快捷方式
+```
 
 ---
 
@@ -155,21 +177,21 @@ setx GOOGLE_API_KEY "你的密钥"
 ## 自测
 
 ```bat
-python test_api.py              :: 69 项端到端 API 自测（临时库 + 临时端口，不影响真实数据）
-python test_tray.py             :: 8 项系统托盘自测（图标创建/事件/最小化恢复）
-python test_autosize.py         :: 7 项悬浮窗自适应自测（内容高度/换行/拖窄重排/详情展开）
-python test_float_features.py   :: 101 项新功能自测（分类自适应网格/结果可滚动/翻页回顶/面板独立缩放/X关闭/搜索全流程/即时搜索/防串扰/大量任务不卡顿/关闭确认/分区块/两列表头/位置持久化/透明化/背景图/四按钮面板/互斥/倒计时/弹窗全链路/未完成数/详情时间/抗闪烁守卫）
-python audit_web_ids.py         :: 审计前端 JS 引用的元素 ID 与 HTML 是否一致
-python test_gui_capture.py      :: 悬浮窗渲染截图 + 缩放逻辑自检（输出 .test_tmp/*.png）
-python main.py --selftest       :: 悬浮窗构建自检（2.5 秒自动退出）
-python main.py --guilive        :: 悬浮窗 + 服务联动自检（4 秒自动退出）
+python tests\test_api.py              :: 69 项端到端 API 自测（临时库 + 临时端口，不影响真实数据）
+python tests\test_tray.py             :: 8 项系统托盘自测（图标创建/事件/最小化恢复）
+python tests\test_autosize.py         :: 7 项悬浮窗自适应自测（内容高度/换行/拖窄重排/详情展开）
+python tests\test_float_features.py   :: 101 项新功能自测（分类自适应网格/结果可滚动/翻页回顶/面板独立缩放/X关闭/搜索全流程/即时搜索/防串扰/大量任务不卡顿/关闭确认/分区块/两列表头/位置持久化/透明化/背景图/四按钮面板/互斥/倒计时/弹窗全链路/未完成数/详情时间/抗闪烁守卫）
+python tests\audit_web_ids.py         :: 审计前端 JS 引用的元素 ID 与 HTML 是否一致
+python tests\test_gui_capture.py      :: 悬浮窗渲染截图 + 缩放逻辑自检（输出 tests\.test_tmp\*.png）
+python app\main.py --selftest         :: 悬浮窗构建自检（2.5 秒自动退出）
+python app\main.py --guilive          :: 悬浮窗 + 服务联动自检（4 秒自动退出）
 ```
 
 ---
 
 ## 常见问题
 
-- **端口 39999 被占用**：提示后请先关闭占用程序，或用 `python main.py --port 40000` 换端口；
+- **端口 39999 被占用**：提示后请先关闭占用程序，或用 `python app\main.py --port 40000` 换端口；
 - **局域网打不开**：检查防火墙是否放行 Python，或确认手机与电脑在同一网络；
 - **AI 提示未检测到 Key**：确认环境变量名正确（见上表），改完后无需重启；若仍不识别，检查变量值是否为空；
 - **AI 提示调用失败/超时**：当前网络可能无法访问该模型（如 Gemini 需能访问 Google），请在 AI 页手动选择 DeepSeek 或 Kimi；

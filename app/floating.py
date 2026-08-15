@@ -34,8 +34,9 @@ try:
 except ImportError:
     ctypes = None
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # app/
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                        # 项目根目录
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 
 BG = "#20242e"
 BG2 = "#2a2f3c"

@@ -5,8 +5,10 @@ import queue
 import sys
 import time
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, BASE)
+BASE = os.path.dirname(os.path.abspath(__file__))               # tests/
+APP_DIR = os.path.join(os.path.dirname(BASE), "app")             # 应用代码目录
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
 
 from ctypes import wintypes
 import ctypes

@@ -4,8 +4,8 @@ import os
 import subprocess
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MAIN_PY = os.path.join(BASE_DIR, "main.py")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # 项目根目录
+MAIN_PY = os.path.join(BASE_DIR, "app", "main.py")
 LNK_NAME = "悬浮任务板.lnk"
 
 

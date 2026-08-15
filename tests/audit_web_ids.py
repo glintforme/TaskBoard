@@ -4,7 +4,9 @@ import os
 import re
 import sys
 
-WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # tests/
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                        # 项目根目录
+WEB = os.path.join(PROJECT_ROOT, "web")
 JS = open(os.path.join(WEB, "app.js"), encoding="utf-8").read()
 HTML = open(os.path.join(WEB, "index.html"), encoding="utf-8").read()
 

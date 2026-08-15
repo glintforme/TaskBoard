@@ -8,11 +8,11 @@ if not errorlevel 1 goto :use_python
 goto :no_python
 
 :use_pythonw
-start "" pythonw "%~dp0main.py"
+start "" pythonw "%~dp0app\main.py"
 goto :done
 
 :use_python
-start "" python "%~dp0main.py"
+start "" python "%~dp0app\main.py"
 goto :done
 
 :no_python
