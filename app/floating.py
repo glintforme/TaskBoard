@@ -741,7 +741,7 @@ class FloatingApp:
             w2.bind("<B1-Motion>", self._panel_motion)
             w2.bind("<ButtonRelease-1>", self._panel_release)
         p.update_idletasks()
-        p.geometry("%dx%d" % (max(320, p.winfo_reqwidth() or 320), max(280, p.winfo_reqheight() or 280)))
+        p.geometry("%dx%d" % (max(320, p.winfo_reqwidth() or 320), max(320, p.winfo_reqheight() or 320)))
         p.withdraw()
         self.search_panel = p
 
@@ -751,9 +751,10 @@ class FloatingApp:
         self._sync_panels()
 
     def _search_page_size(self, h):
-        """按面板高度计算每页任务数（窗口越大一页显示越多，HTML 式分页）。"""
-        results_h = max(50, h - 110 - 34)
-        return max(2, (results_h - 22) // 18)
+        """每页任务数：固定上限 8 条（类似网页"每页 N 条"），
+        且不超过结果区实际能放下的行数（行高 18px，结果区从 y=126 到分页条 y=h-26）。"""
+        max_fit = max(2, (h - 126 - 26 - 4) // 18)
+        return min(8, max_fit)
 
     def _on_search_cv_configure(self, e):
         """搜索面板布局：各元素随面板尺寸自适应摆放（面板无背景图、无黑框）。"""
@@ -912,7 +913,7 @@ class FloatingApp:
                 return
             for i in list(cv.find_withtag("srow")):
                 cv.delete(i)
-            tasks = r.get("tasks") or []
+            tasks = (r.get("tasks") or [])[:self._search_state.get("page_size", 8)]
             self._search_state.update({"page": r.get("page", 1), "pages": r.get("pages", 1),
                                        "total": r.get("total", 0),
                                        "page_size": int(r.get("page_size") or
@@ -1065,6 +1066,12 @@ class FloatingApp:
                 ow = self._search_user_w or self.search_panel.winfo_width() \
                     or self.search_panel.winfo_reqwidth()
                 self.search_panel.geometry("+%d+%d" % (max(0, x - ow - 6), y))
+                # 强制按实际尺寸布局（隐藏面板上 Configure 事件不可靠）：
+                # 保证每页条数/行起始位置与真实面板尺寸一致
+                if getattr(self, "_search_cv", None) is not None:
+                    self._on_search_cv_configure(type("E", (), {
+                        "width": self._search_cv.winfo_width(),
+                        "height": self._search_cv.winfo_height()}))
             else:
                 self.search_panel.withdraw()
         except Exception:

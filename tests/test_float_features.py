@@ -1030,18 +1030,19 @@ def main():
                   and app.search_panel.state() == "withdrawn",
                   "open=%s state=%s" % (app._panel_open["search"], app.search_panel.state()))
 
-            # ---- 12g. 分类自适应网格 + 结果可滚动分页 ----
+            # ---- 12g. 分类自适应网格 + 分页 ----
             if not app._panel_open.get("search"):
                 app._toggle_panel("search")
             app.root.update()
-            cat_infos = [(val, b.grid_info().get("row"), b.grid_info().get("column"))
-                         for val, b in app._cat_buttons.items()]
-            check("分类为4×2自适应网格", len(cat_infos) == 8
-                  and all(0 <= r <= 1 for _, r, _ in cat_infos)
-                  and all(0 <= c <= 3 for _, _, c in cat_infos), str(cat_infos))
-            cat_row = app._cat_buttons[""].master
-            weights = [cat_row.grid_columnconfigure(c)["weight"] for c in range(4)]
-            check("分类列等宽自适应", all(w == 1 for w in weights), str(weights))
+            # 分类 4×2 网格（画布项坐标：4 列 × 2 行，随宽度等宽均分）
+            cat_bb = {v: tuple(round(n) for n in app._search_cv.coords(rid))
+                      for v, (rid, tid) in app._cat_items.items()}
+            xs = sorted({b[0] for b in cat_bb.values()})
+            ys = sorted({b[1] for b in cat_bb.values()})
+            check("分类为4×2自适应网格(画布)",
+                  len(cat_bb) == 8 and len(xs) == 4 and len(ys) == 2, str(cat_bb))
+            gaps = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+            check("分类列等宽自适应", bool(gaps) and max(gaps) - min(gaps) <= 2, "gaps=%s" % gaps)
             # 注入 12 条结果 → 全部渲染且结果区可滚动
             app._search_input.delete(0, "end")
             app._search_set_cat("")
@@ -1051,23 +1052,31 @@ def main():
                     break
                 time.sleep(0.1)
             app.root.update()
-            app._search_req_id += 1  # 使此前的响应全部过期
-            tasks12 = [{"id": 9500 + i, "title": "分页任务 %03d" % i, "scope": "today",
-                        "done_count": 0, "last_completed_at": None} for i in range(12)]
-            app.q.put(("search", app._search_req_id,
-                       {"tasks": tasks12, "page": 1, "pages": 2, "total": 12,
-                        "page_size": app._search_state.get("page_size", 8)}))
-            app._poll_queue_once()
+            # 真实服务端分页：加入 25 个任务（共 30+）→ 每页最多 8 条、自动多页、可翻页
+            for i in range(25):
+                db.add_task("分页实测任务 %02d" % i, "today", due_date="2026-08-15")
+            app._search_input.delete(0, "end")
+            app._search_set_cat("")
+            for _ in range(40):
+                app.root.update()
+                if app._search_state["total"] >= 25:
+                    break
+                time.sleep(0.1)
             app.root.update()
-            app.search_panel.update_idletasks()
-            # 按窗口大小分页：任务数超出每页容量 → 分页显示（无滚动黑框，结果直接绘制在面板上）
             ps = app._search_state.get("page_size", 8)
             rows12 = app._search_cv.find_withtag("srow")
-            check("结果区按窗口大小分页显示", len(rows12) == ps and app._search_state["pages"] >= 2,
+            check("结果区分页显示且每页最多8条",
+                  len(rows12) == ps and ps <= 8 and app._search_state["pages"] >= 2,
                   "rows=%d page_size=%d pages=%s" % (len(rows12), ps, app._search_state["pages"]))
             check("无滚动黑框(结果直接绘制在面板画布)",
-                  not hasattr(app, "_search_canvas"), "")
-            # 翻页：下一页 → 新一页任务替换上一页
+                  not hasattr(app, "_search_sbar"), "")
+            # 任务行不与底部翻页按钮重叠（全部可见）
+            last_bb = app._search_cv.bbox(rows12[-1]) if len(rows12) else None
+            pager_y = app.search_panel.winfo_height() - 26
+            check("任务行不与翻页按钮重叠",
+                  last_bb is not None and last_bb[3] <= pager_y + 1,
+                  "last_bottom=%s pager_y=%s" % (last_bb[3] if last_bb else None, pager_y))
+            # 翻页：下一页 → 真实服务端第2页任务替换上一页
             app._search_next.invoke()
             for _ in range(20):
                 app.root.update()
@@ -1078,7 +1087,9 @@ def main():
             check("翻页到第2页", app._search_state["page"] == 2, str(app._search_state["page"]))
             app.search_panel.update_idletasks()
             rows2 = app._search_cv.find_withtag("srow")
-            check("第2页显示剩余任务", len(rows2) == 12 - ps, "rows=%d expect=%d" % (len(rows2), 12 - ps))
+            check("第2页显示后续任务", len(rows2) == ps, "rows=%d expect=%d" % (len(rows2), ps))
+            st_real = dict(app._search_state)
+            check("多页自动生成(总任务多→页数>1)", st_real.get("pages", 1) >= 2, str(st_real))
             app._toggle_panel("search")
             app.root.update()
             app._toggle_panel("search")
