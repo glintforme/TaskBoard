@@ -366,7 +366,7 @@ def main():
                 app.bg_opacity = 0.7
                 app._load_bg_image()
                 app.root.update()
-                # 界面1：背景图必须是最底层（不再遮挡文字/按钮），且整张完整可见（contain）
+                # 界面1：背景图必须是最底层（不遮挡文字/按钮），且 cover 铺满（无黑边）
                 if app._bg_item is not None:
                     first = app.collapsed.find_all()[0]
                     check("壁纸:界面1背景图置底", first == app._bg_item,
@@ -376,17 +376,17 @@ def main():
                     check("壁纸:界面1背景图居中",
                           abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
                           "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
-                    # contain 自适应：缩放后图片 ≤ 画布（整张可见）
+                    # cover 铺满：缩放后图片 ≥ 画布（彩色图像全铺满、无黑边）
                     p1 = app._bg_surf_collapsed.get("photo")
                     if p1:
-                        check("壁纸:背景图整张完整可见(contain)",
-                              p1.width() <= w and p1.height() <= h,
+                        check("壁纸:背景图cover铺满无黑边",
+                              p1.width() >= w and p1.height() >= h,
                               "photo=%s canvas=%s" % ((p1.width(), p1.height()), (w, h)))
                     else:
-                        check("壁纸:背景图整张完整可见(contain)", False, "photo 未生成")
+                        check("壁纸:背景图cover铺满无黑边", False, "photo 未生成")
                 else:
                     check("壁纸:界面1背景图置底", False, "bg item 未创建")
-                # 界面2：展开后内层画布也有背景图且置底
+                # 界面2：展开后内层画布也有背景图且置底（同样 cover 铺满）
                 app.set_expanded(True)
                 app.root.update()
                 it2 = app._bg_surf_expand.get("item")
@@ -394,26 +394,25 @@ def main():
                     first2 = app.canvas.find_all()[0]
                     check("壁纸:界面2背景图存在且置底", first2 == it2,
                           "first=%s bg=%s" % (first2, it2))
+                    cw2, ch2 = app.canvas.winfo_width(), app.canvas.winfo_height()
+                    p2x = app._bg_surf_expand.get("photo")
+                    check("壁纸:界面2背景图cover铺满",
+                          p2x is not None and p2x.width() >= cw2 and p2x.height() >= ch2,
+                          "photo=%s canvas=%s" % ((p2x.width(), p2x.height()) if p2x else None, (cw2, ch2)))
                 else:
                     check("壁纸:界面2背景图存在且置底", False, "expand bg 未创建")
                 app.set_expanded(False)
                 app.root.update()
-                # 搜索面板：只保留最外层整面板一张壁纸（结果区无背景图）
+                # 搜索面板：不显示背景图（无 __bg__ 项）
                 app._toggle_panel("search")
                 app.root.update()
                 time.sleep(0.15)
                 app.root.update()
-                it4 = app._bg_surf_search_chrome.get("item")
-                if it4 is not None:
-                    first4 = app._search_cv.find_all()[0]
-                    check("壁纸:搜索面板整面背景图置底", first4 == it4,
-                          "first=%s bg=%s" % (first4, it4))
-                    # 结果区不再有内层背景图（不重叠）
-                    check("壁纸:结果区无内层背景图",
-                          len(app._search_canvas.find_withtag("__bg__")) == 0,
-                          str(app._search_canvas.find_withtag("__bg__")))
-                else:
-                    check("壁纸:搜索面板整面背景图置底", False, "chrome bg 未创建")
+                check("壁纸:搜索面板无背景图",
+                      len(app._search_cv.find_withtag("__bg__")) == 0
+                      and len(app._search_canvas.find_withtag("__bg__")) == 0,
+                      "cv_bg=%s canvas_bg=%s" % (app._search_cv.find_withtag("__bg__"),
+                                                 app._search_canvas.find_withtag("__bg__")))
                 app._toggle_panel("search")
                 app.root.update()
                 # 自适应：改变窗口大小 → 背景图随画布重新居中且重新降采样
@@ -426,18 +425,17 @@ def main():
                 check("壁纸:窗口缩放后背景图随动",
                       abs(cx - w / 2) < 2 and abs(cy - h / 2) < 2,
                       "%s,%s vs %s,%s" % (cx, cy, w / 2, h / 2))
-                p2 = app._bg_surf_collapsed.get("photo")
-                check("壁纸:缩放后重新降采样且整张可见",
-                      p2 is not None and p2.width() <= w and p2.height() <= h,
+                p3 = app._bg_surf_collapsed.get("photo")
+                check("壁纸:缩放后重新降采样且铺满",
+                      p3 is not None and p3.width() >= w and p3.height() >= h,
                       "factor=%s photo=%s canvas=%s" % (app._bg_surf_collapsed.get("factor"),
-                                                        (p2.width(), p2.height()) if p2 else None, (w, h)))
+                                                        (p3.width(), p3.height()) if p3 else None, (w, h)))
                 # 移除后各面板清空
                 app._remove_bg_image()
                 app.root.update()
                 check("壁纸:移除后各面板清空",
                       app._bg_display is None
-                      and app._bg_surf_expand.get("item") is None
-                      and app._bg_surf_search_chrome.get("item") is None, "")
+                      and app._bg_surf_expand.get("item") is None, "")
 
             # ---- 4. 功能按钮（齿轮/图片/扳手，靠右）面板跟随 ----
             app._sync_panels()

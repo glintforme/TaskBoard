@@ -2,8 +2,8 @@
 """桌面悬浮窗（tkinter）：
 - 折叠态：显示 日常/周常/月常 任务数与 今日完成/总完成 统计，并显示今日待完成任务标题；每 5 秒自动刷新；
 - 透明化：整窗透明度可调（默认 72%，可透见桌面）；可导入自定义背景图片（PNG/GIF/JPG，自带透明度，默认透至桌面可见）；
-  背景图作为壁纸 **contain 自适应**（整张图片完整可见、居中，拖拽缩放实时重采样跟随、不裁切），始终**置底不遮挡内容**；
-  显示于 界面1（折叠态，随任务增多聊天框式扩大）/ 界面2（展开态，含任务详情）/ 搜索面板（最外层整面板一张，结果区不含壁纸），后台设置页同样显示该背景图；
+  背景图作为壁纸 **cover 自适应**（彩色图像全铺满、无黑边，拖拽缩放实时重采样跟随），始终**置底不遮挡内容**；
+  显示于 界面1（折叠态，随任务增多聊天框式扩大）/ 界面2（展开态，含任务详情）；搜索面板不显示背景图；后台设置页同样显示该背景图；
 - 左键单击：展开/收起任务明细（每条带「完成」按钮）；点击任务标题展开完整内容；
 - 拖动：按住窗口任意位置（非按钮区域）可随意拖动；边缘 6px 内可拖拽缩放（手动调整的尺寸不会被自动适配回弹）；
   拖到屏幕右缘附近自动吸附隐藏到侧边，点击隐藏位置即可恢复原位；
@@ -407,7 +407,7 @@ class FloatingApp:
     # ---------------- 背景图片（统一壁纸引擎） ----------------
     def _bg_paint(self, surf):
         """把背景图按画布大小自适应绘制到 surf（canvas），始终置底、居中。
-        contain 模式：缩放后图片整张不超出画布（完整可见、无裁切），
+        cover 模式：缩放后图片 ≥ 画布（彩色图像全铺满、无黑边，溢出部分裁切），
         随画布尺寸变化实时重采样；尺寸变化只换整数 (zoom, subsample) 组合，避免频繁重建。"""
         canvas = surf.get("canvas")
         if canvas is None or self._bg_master is None:
@@ -422,16 +422,22 @@ class FloatingApp:
         mw, mh = self._bg_master.width(), self._bg_master.height()
         if mw < 1 or mh < 1:
             return
-        # contain：缩放后图片 ≤ 画布（整张可见）。整数因子组合 (zoom, subsample)。
+        # cover：缩放后图片 ≥ 画布（铺满无黑边）。整数因子组合 (zoom, subsample)。
         import math
         sx, sy = w / mw, h / mh
         kz, ks = 1, 1
-        if sx < 1 or sy < 1:
-            # 至少一维需要缩小 → 缩小到两维都不超过画布
-            ks = max(1, math.ceil(max(mw / max(w, 1), mh / max(h, 1))))
+        if sx <= 1 and sy <= 1:
+            # 纯降采样：取能覆盖的最小整数因子
+            ks = max(1, min(mw // max(w, 1), mh // max(h, 1)))
         else:
-            # 纯放大 → 整数 zoom 不超过画布（限制内存与画质）
-            kz = max(1, min(int(min(sx, sy)), 64))
+            # 需要放大（至少一个维度不足）：整数 zoom 到覆盖
+            kz = max(1, min(math.ceil(max(sx, sy)), 64))
+            # 放大后若某维远大于画布，再降采样控内存（仍保持覆盖）
+            pw, ph = mw * kz, mh * kz
+            if pw > w * 2 or ph > h * 2:
+                k2 = max(1, min(pw // max(w, 1), ph // max(h, 1)))
+                if k2 > 1:
+                    ks = k2
         sig = (kz, ks)
         if surf.get("factor") != sig:
             if kz > 1 or ks > 1:
@@ -676,12 +682,10 @@ class FloatingApp:
         except tk.TclError:
             pass
         p.configure(bg=BG2, highlightthickness=1, highlightbackground="#3a4152")
-        # 全画布布局：背景壁纸铺满整面板，各内容项悬浮其上
+        # 全画布布局：搜索面板不显示背景图（纯深色），内容直接画在画布上
         cv = tk.Canvas(p, bg=BG2, highlightthickness=0)
         cv.pack(fill="both", expand=True)
         self._search_cv = cv
-        self._bg_surf_search_chrome = {"canvas": cv, "item": None, "photo": None, "factor": None}
-        self._bg_surfaces.append(self._bg_surf_search_chrome)
 
         # 顶部标题 + X 关闭（画布文本）
         cv.create_text(10, 6, anchor="nw", text="🔍 搜索任务", fill=ACCENT,
@@ -767,13 +771,11 @@ class FloatingApp:
         self._sync_panels()
 
     def _on_search_cv_configure(self, e):
-        """搜索面板布局：各元素随面板尺寸自适应摆放（背景壁纸铺满整面板）。"""
+        """搜索面板布局：各元素随面板尺寸自适应摆放（面板无背景图）。"""
         try:
             cv = self._search_cv
             w = e.width or cv.winfo_width()
             h = e.height or cv.winfo_height()
-            if self._bg_surf_search_chrome is not None:
-                self._bg_paint(self._bg_surf_search_chrome)
             if w < 60 or h < 80:
                 return
             cv.coords(self._search_close_item, w - 8, 6)
@@ -1082,8 +1084,6 @@ class FloatingApp:
                 ow = self._search_user_w or self.search_panel.winfo_width() \
                     or self.search_panel.winfo_reqwidth()
                 self.search_panel.geometry("+%d+%d" % (max(0, x - ow - 6), y))
-                if getattr(self, "_bg_surf_search_chrome", None) is not None:
-                    self._bg_paint(self._bg_surf_search_chrome)
             else:
                 self.search_panel.withdraw()
         except Exception:
