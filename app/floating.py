@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """桌面悬浮窗（tkinter）：
 - 折叠态：显示 日常/周常/月常 任务数与 今日完成/总完成 统计，并显示今日待完成任务标题；每 5 秒自动刷新；
-- 透明化：整窗透明度可调（默认 72%，可透见桌面）；可导入自定义背景图片（PNG/GIF，自带透明度，默认透至桌面可见）；
+- 透明化：整窗透明度可调（默认 72%，可透见桌面）；可导入自定义背景图片（PNG/GIF/JPG，自带透明度，默认透至桌面可见）；
 - 左键单击：展开/收起任务明细（每条带「完成」按钮）；点击任务标题展开完整内容；
 - 拖动：按住窗口任意位置（非按钮区域）可随意拖动；边缘 6px 内可拖拽缩放（手动调整的尺寸不会被自动适配回弹）；
   拖到屏幕右缘附近自动吸附隐藏到侧边，点击隐藏位置即可恢复原位；
@@ -408,7 +408,10 @@ class FloatingApp:
         if not path or not os.path.isfile(path):
             return
         try:
-            photo = tk.PhotoImage(file=path)
+            if path.lower().endswith((".jpg", ".jpeg", ".jpe", ".jfif")):
+                photo = self._load_jpeg(path)
+            else:
+                photo = tk.PhotoImage(file=path)
             w, h = photo.width(), photo.height()
             maxdim = 800
             if max(w, h) > maxdim:
@@ -425,16 +428,35 @@ class FloatingApp:
             self._save_bg_config()
             import tkinter.messagebox as mb
             try:
-                mb.showwarning("背景图片", "图片加载失败（仅支持 PNG / GIF / PPM 格式）：\n%s" % e,
+                mb.showwarning("背景图片", "图片加载失败（仅支持 PNG / GIF / JPG / PPM 格式）：\n%s" % e,
                                parent=self.image_panel if hasattr(self, "image_panel") else self.root)
             except Exception:
+                pass
+
+    def _load_jpeg(self, path):
+        """Tk 不原生支持 JPEG：用 Windows GDI+ 解码 → 临时 PPM → PhotoImage。"""
+        import tempfile as _tf
+        import winimg
+        w, h, rgb = winimg.decode_rgb(path)
+        w, h, rgb = winimg.fit_rgb(w, h, rgb)
+        fd, tmp = _tf.mkstemp(suffix=".ppm")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(b"P6\n%d %d\n255\n" % (w, h))
+                f.write(rgb)
+            return tk.PhotoImage(file=tmp)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
                 pass
 
     def _import_bg_image(self):
         import tkinter.filedialog as fd
         parent = getattr(self, "image_panel", None) or self.root
         path = fd.askopenfilename(parent=parent, title="选择背景图片",
-                                  filetypes=[("图片", "*.png *.gif *.ppm *.pgm"), ("所有文件", "*.*")])
+                                  filetypes=[("图片", "*.png *.gif *.jpg *.jpeg *.jfif *.ppm *.pgm"),
+                                             ("所有文件", "*.*")])
         if not path:
             return
         old = self.bg_image_path

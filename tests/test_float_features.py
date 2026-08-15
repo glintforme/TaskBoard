@@ -55,6 +55,54 @@ def write_png(path, w, h, pixel_rgb):
         f.write(png)
 
 
+def make_jpg(path, w, h, rgb):
+    """用 Windows GDI+ 把纯色 PNG 转成真实 JPEG 文件（独立实现，不依赖 app.winimg）。"""
+    import ctypes
+    import ctypes.wintypes as wt
+    try:
+        g = ctypes.WinDLL("gdiplus")
+
+        class StartupInput(ctypes.Structure):
+            _fields_ = [("GdiplusVersion", wt.UINT), ("DebugEventCallback", ctypes.c_void_p),
+                        ("SuppressBackgroundThread", wt.BOOL), ("SuppressExternalCodecs", wt.BOOL)]
+
+        g.GdiplusStartup.restype = wt.UINT
+        g.GdiplusStartup.argtypes = [ctypes.POINTER(ctypes.c_size_t),
+                                     ctypes.POINTER(StartupInput), ctypes.c_void_p]
+        g.GdiplusShutdown.argtypes = [ctypes.c_size_t]
+        g.GdipCreateBitmapFromFile.restype = wt.UINT
+        g.GdipCreateBitmapFromFile.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
+        g.GdipSaveImageToFile.restype = wt.UINT
+        g.GdipSaveImageToFile.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p,
+                                          ctypes.c_void_p, ctypes.c_void_p]
+        g.GdipDisposeImage.restype = wt.UINT
+        g.GdipDisposeImage.argtypes = [ctypes.c_void_p]
+        png_tmp = path + ".src.png"
+        write_png(png_tmp, w, h, rgb)
+        tok = ctypes.c_size_t()
+        si = StartupInput(1, None, False, False)
+        if g.GdiplusStartup(ctypes.byref(tok), ctypes.byref(si), None) != 0:
+            return False
+        try:
+            bmp = ctypes.c_void_p()
+            if g.GdipCreateBitmapFromFile(png_tmp, ctypes.byref(bmp)) != 0 or not bmp.value:
+                return False
+            try:
+                # ImageFormatJPEG {557CF401-1A04-11D3-9A73-0000F81EF32E}
+                jpeg_clsid = (ctypes.c_byte * 16)(
+                    0x01, 0xf4, 0x7c, 0x55, 0x04, 0x1a, 0xd3, 0x11,
+                    0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e)
+                if g.GdipSaveImageToFile(bmp, path, jpeg_clsid, None) != 0:
+                    return False
+                return os.path.isfile(path) and os.path.getsize(path) > 0
+            finally:
+                g.GdipDisposeImage(bmp)
+        finally:
+            g.GdiplusShutdown(tok)
+    except Exception:
+        return False
+
+
 def panel_texts(widget):
     import re
     out = []
@@ -256,6 +304,49 @@ def main():
                 app._load_bg_image()
                 with open(cfg_path3, "w", encoding="utf-8") as f:
                     json.dump(orig_cfg3, f, ensure_ascii=False, indent=2)
+
+            # ---- 3c. JPG 背景图（回归：Tk 不原生支持 JPEG，需 GDI+ 解码） ----
+            jpg_path = os.path.join(OUT, "test_bg.jpg")
+            jpg_ok = make_jpg(jpg_path, 8, 8, (200, 100, 50))
+            check("JPG:测试图片生成成功", jpg_ok, jpg_path)
+            if jpg_ok:
+                with open(cfg_path3, "r", encoding="utf-8") as f:
+                    orig_cfg3c = json.load(f)
+                try:
+                    app.bg_image_path = ""
+                    app.bg_opacity = 1.0
+                    _tfd.askopenfilename = lambda **kw: jpg_path
+                    app._import_bg_image()
+                    app.root.update()
+                    check("JPG:导入后成功加载",
+                          app._bg_display is not None and app._bg_item is not None, "")
+                    if app._bg_display:
+                        px = app._bg_display.get(0, 0)
+                        check("JPG:像素色彩还原(容差±15)",
+                              all(abs(a - b) <= 15 for a, b in zip(px[:3], (200, 100, 50))),
+                              str(px))
+                    with open(cfg_path3, "r", encoding="utf-8") as f:
+                        cfg3c = json.load(f)
+                    check("JPG:路径已保存到配置", cfg3c.get("bg_image") == jpg_path,
+                          str(cfg3c.get("bg_image")))
+                    # 大图自动降采样（>800 像素）
+                    big_jpg = os.path.join(OUT, "test_big.jpg")
+                    make_jpg(big_jpg, 1600, 1200, (80, 160, 240))
+                    app.bg_image_path = big_jpg
+                    app._load_bg_image()
+                    app.root.update()
+                    if app._bg_display:
+                        check("JPG:大图自动降采样≤800",
+                              max(app._bg_display.width(), app._bg_display.height()) <= 800,
+                              str((app._bg_display.width(), app._bg_display.height())))
+                    else:
+                        check("JPG:大图自动降采样≤800", False, "big jpg 未加载")
+                finally:
+                    app.bg_image_path = ""
+                    app.bg_opacity = 0.7
+                    app._load_bg_image()
+                    with open(cfg_path3, "w", encoding="utf-8") as f:
+                        json.dump(orig_cfg3c, f, ensure_ascii=False, indent=2)
 
             # ---- 4. 功能按钮（齿轮/图片/扳手，靠右）面板跟随 ----
             app._sync_panels()
