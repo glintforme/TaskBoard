@@ -180,7 +180,7 @@ TaskBoard/
 python tests\test_api.py              :: 69 项端到端 API 自测（临时库 + 临时端口，不影响真实数据）
 python tests\test_tray.py             :: 8 项系统托盘自测（图标创建/事件/最小化恢复）
 python tests\test_autosize.py         :: 7 项悬浮窗自适应自测（内容高度/换行/拖窄重排/详情展开）
-python tests\test_float_features.py   :: 101 项新功能自测（分类自适应网格/结果可滚动/翻页回顶/面板独立缩放/X关闭/搜索全流程/即时搜索/防串扰/大量任务不卡顿/关闭确认/分区块/两列表头/位置持久化/透明化/背景图/四按钮面板/互斥/倒计时/弹窗全链路/未完成数/详情时间/抗闪烁守卫）
+python tests\test_float_features.py   :: 108 项新功能自测（分类自适应网格/结果可滚动/翻页回顶/面板独立缩放/X关闭/搜索全流程/即时搜索/防串扰/大量任务不卡顿/关闭确认/分区块/两列表头/位置持久化/透明化/背景图导入全流程/四按钮面板/互斥/倒计时/弹窗全链路/未完成数/详情时间/抗闪烁守卫）
 python tests\audit_web_ids.py         :: 审计前端 JS 引用的元素 ID 与 HTML 是否一致
 python tests\test_gui_capture.py      :: 悬浮窗渲染截图 + 缩放逻辑自检（输出 tests\.test_tmp\*.png）
 python app\main.py --selftest         :: 悬浮窗构建自检（2.5 秒自动退出）

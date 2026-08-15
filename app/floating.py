@@ -432,7 +432,8 @@ class FloatingApp:
 
     def _import_bg_image(self):
         import tkinter.filedialog as fd
-        path = fd.askopenfilename(parent=self.opt_panel, title="选择背景图片",
+        parent = getattr(self, "image_panel", None) or self.root
+        path = fd.askopenfilename(parent=parent, title="选择背景图片",
                                   filetypes=[("图片", "*.png *.gif *.ppm *.pgm"), ("所有文件", "*.*")])
         if not path:
             return

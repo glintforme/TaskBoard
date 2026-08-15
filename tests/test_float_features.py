@@ -69,6 +69,20 @@ def panel_texts(widget):
     return "".join(out)
 
 
+def find_button(widget, text):
+    """递归查找文本匹配的 tk.Button 控件。"""
+    for w in widget.winfo_children():
+        try:
+            if w.winfo_class() == "Button" and str(w.cget("text")) == text:
+                return w
+        except Exception:
+            pass
+        r = find_button(w, text)
+        if r is not None:
+            return r
+    return None
+
+
 def collapsed_texts(app):
     """折叠态画布上所有文本项内容。"""
     out = []
@@ -191,6 +205,57 @@ def main():
             app.bg_opacity = 0.7  # 还原默认，避免污染配置文件
             app._remove_bg_image()
             check("移除背景图片", app._bg_display is None, "")
+
+            # ---- 3b. 「🖼 导入背景图片」完整流程（回归：曾因 self.opt_panel 不存在而点击无反应） ----
+            import tkinter.filedialog as _tfd
+            import tkinter.messagebox as _tmb
+            cfg_path3 = os.path.join(ROOT, "config.json")
+            with open(cfg_path3, "r", encoding="utf-8") as f:
+                orig_cfg3 = json.load(f)
+            real_fd = _tfd.askopenfilename
+            real_warn = _tmb.showwarning
+            warned = []
+            try:
+                app.bg_image_path = ""
+                app.bg_opacity = 0.7
+                # ① 点面板上的「🖼 导入背景图片」按钮 → 选图 → 加载 + 保存配置
+                _tfd.askopenfilename = lambda **kw: img_path
+                btn = find_button(app.image_panel, "🖼 导入背景图片")
+                check("导入背景图片:面板按钮存在", btn is not None, "")
+                btn.invoke()
+                app.root.update()
+                check("导入背景图片:选图后成功加载", app._bg_display is not None and app._bg_item is not None, "")
+                with open(cfg_path3, "r", encoding="utf-8") as f:
+                    cfg3 = json.load(f)
+                check("导入背景图片:路径已保存到配置", cfg3.get("bg_image") == img_path,
+                      str(cfg3.get("bg_image")))
+                # ② 取消对话框 → 状态不变
+                _tfd.askopenfilename = lambda **kw: ""
+                app._import_bg_image()
+                app.root.update()
+                check("导入背景图片:取消后保留原图", app._bg_display is not None, "")
+                with open(cfg_path3, "r", encoding="utf-8") as f:
+                    cfg3b = json.load(f)
+                check("导入背景图片:取消后配置不变", cfg3b.get("bg_image") == img_path,
+                      str(cfg3b.get("bg_image")))
+                # ③ 选择损坏文件 → 警告 + 回退旧图
+                bad_path = os.path.join(OUT, "bad.png")
+                with open(bad_path, "wb") as f:
+                    f.write(b"this is not a real png file \x00\x01\x02")
+                _tmb.showwarning = lambda *a, **k: warned.append(a)
+                _tfd.askopenfilename = lambda **kw: bad_path
+                app._import_bg_image()
+                app.root.update()
+                check("导入背景图片:坏图弹出警告", len(warned) == 1, str(warned))
+                check("导入背景图片:坏图后回退旧图", app.bg_image_path == img_path,
+                      str(app.bg_image_path))
+            finally:
+                _tfd.askopenfilename = real_fd
+                _tmb.showwarning = real_warn
+                app.bg_image_path = ""
+                app._load_bg_image()
+                with open(cfg_path3, "w", encoding="utf-8") as f:
+                    json.dump(orig_cfg3, f, ensure_ascii=False, indent=2)
 
             # ---- 4. 功能按钮（齿轮/图片/扳手，靠右）面板跟随 ----
             app._sync_panels()
